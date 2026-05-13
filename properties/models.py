@@ -1,0 +1,145 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
+class UserProfile(models.Model):
+    ROLE_CHOICES = [
+        ('owner', 'Property Owner'),
+        ('manager', 'Property Manager'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='owner')
+    phone = models.CharField(max_length=20, blank=True)
+    company_name = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.role}"
+
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    instance.profile.save()
+
+
+class Property(models.Model):
+    PROPERTY_TYPES = [
+        ('Apartment', 'Apartment'),
+        ('House', 'House'),
+        ('Condo', 'Condo'),
+        ('Commercial', 'Commercial'),
+        ('Villa', 'Villa'),
+        ('Townhouse', 'Townhouse'),
+    ]
+
+    name = models.CharField(max_length=200)
+    address = models.TextField()
+    property_type = models.CharField(max_length=50, choices=PROPERTY_TYPES)
+    description = models.TextField(blank=True)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Unit(models.Model):
+    STATUS_CHOICES = [
+        ('Available', 'Available'),
+        ('Occupied', 'Occupied'),
+        ('Maintenance', 'Maintenance'),
+        ('Unavailable', 'Unavailable'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='units')
+    unit_number = models.CharField(max_length=50)
+    bedrooms = models.IntegerField(default=1)
+    toilets = models.IntegerField(default=1)
+    bathrooms = models.IntegerField(default=1)
+    size_sqft = models.IntegerField(null=True, blank=True)
+    price_sale = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    price_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.property.name} - {self.unit_number}"
+
+
+class Tenant(models.Model):
+    unit = models.OneToOneField(Unit, on_delete=models.CASCADE, related_name='tenant')
+    name = models.CharField(max_length=200)
+    phone = models.CharField(max_length=20)
+    email = models.EmailField()
+    address = models.TextField(blank=True)
+    monthly_rent = models.DecimalField(max_digits=10, decimal_places=2)
+    lease_start_date = models.DateField()
+    lease_renewal_date = models.DateField(null=True, blank=True)
+    lease_expiry_date = models.DateField()
+    move_in_date = models.DateField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Payment(models.Model):
+    PAYMENT_METHODS = [
+        ('Cash', 'Cash'),
+        ('Bank Transfer', 'Bank Transfer'),
+        ('Credit Card', 'Credit Card'),
+        ('Mobile Money', 'Mobile Money'),
+        ('Cheque', 'Cheque'),
+    ]
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_date = models.DateField()
+    payment_method = models.CharField(max_length=50, choices=PAYMENT_METHODS)
+    month_for = models.CharField(max_length=50)  # e.g., "May 2024"
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.tenant.name} - {self.amount} - {self.month_for}"
+
+
+class MaintenanceRequest(models.Model):
+    PRIORITY_CHOICES = [
+        ('Low', 'Low'),
+        ('Medium', 'Medium'),
+        ('High', 'High'),
+    ]
+
+    STATUS_CHOICES = [
+        ('Reported', 'Reported'),
+        ('In Progress', 'In Progress'),
+        ('Resolved', 'Resolved'),
+    ]
+
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name='maintenance_requests')
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='Medium')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Reported')
+    reported_by = models.CharField(max_length=200)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.unit.unit_number} - {self.title}"
