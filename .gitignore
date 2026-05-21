@@ -108,3 +108,7 @@ dmypy.json
 .DS_Store
 *.swp
 *.swo
+
+# Generated static files (collectstatic generates these at deploy time)
+staticfiles/
+static/
