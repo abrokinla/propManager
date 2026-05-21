@@ -43,7 +43,7 @@ class PropertySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'description', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'address', 'property_type', 'description', 'total_units', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_units_count(self, obj):
@@ -56,7 +56,7 @@ class PropertyListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'owner', 'units_count', 'created_at']
+        fields = ['id', 'name', 'address', 'property_type', 'total_units', 'owner', 'units_count', 'created_at']
 
     def get_units_count(self, obj):
         return obj.units.count()
@@ -106,6 +106,13 @@ class TenantSerializer(serializers.ModelSerializer):
                   'lease_start_date', 'lease_renewal_date', 'lease_expiry_date', 'move_in_date',
                   'is_active', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'phone': {'required': False, 'allow_blank': True},
+            'email': {'required': False, 'allow_blank': True},
+            'lease_start_date': {'required': False, 'allow_null': True},
+            'lease_expiry_date': {'required': False, 'allow_null': True},
+            'move_in_date': {'required': False, 'allow_null': True},
+        }
 
 
 class TenantListSerializer(serializers.ModelSerializer):
@@ -129,19 +136,23 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Payment
-        fields = ['id', 'tenant', 'tenant_id', 'amount', 'payment_date', 'payment_method', 'month_for', 'notes', 'created_at']
+        fields = ['id', 'tenant', 'tenant_id', 'amount', 'payment_date', 'payment_method', 'month_for', 'reference', 'notes', 'created_at']
         read_only_fields = ['created_at']
 
 
 class PaymentListSerializer(serializers.ModelSerializer):
     tenant_name = serializers.SerializerMethodField()
+    unit_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ['id', 'tenant_name', 'amount', 'payment_date', 'payment_method', 'month_for']
+        fields = ['id', 'tenant_name', 'unit_number', 'amount', 'payment_date', 'payment_method', 'month_for', 'reference']
 
     def get_tenant_name(self, obj):
         return obj.tenant.name
+
+    def get_unit_number(self, obj):
+        return obj.tenant.unit.unit_number
 
 
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
@@ -153,6 +164,9 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
         fields = ['id', 'unit', 'unit_id', 'title', 'description', 'priority', 'status',
                   'reported_by', 'resolved_at', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'reported_by': {'required': False, 'allow_blank': True},
+        }
 
 
 class MaintenanceRequestListSerializer(serializers.ModelSerializer):

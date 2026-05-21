@@ -8,7 +8,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
     PaymentViewSet, MaintenanceRequestViewSet,
-    register_view, login_view, dashboard_stats, profile_view
+    register_view, login_view, dashboard_stats, profile_view,
+    health_check
 )
 
 router = DefaultRouter()
@@ -24,6 +25,7 @@ urlpatterns = [
     path('api/register/', register_view, name='register'),
     path('api/login/', login_view, name='login'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    path('api/health/', health_check, name='health-check'),
     path('api/dashboard/stats/', dashboard_stats, name='dashboard-stats'),
     path('api/profile/', profile_view, name='profile'),
 ]

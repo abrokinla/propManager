@@ -1,10 +1,11 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 from django.db.models import Count, Sum, Q
+from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
 from .models import Property, Unit, Tenant, Payment, MaintenanceRequest
 from .serializers import (
@@ -13,6 +14,12 @@ from .serializers import (
     MaintenanceRequestSerializer, MaintenanceRequestListSerializer,
     RegisterSerializer, UserSerializer, UserProfileSerializer
 )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    return Response({'status': 'ok'})
 
 
 @api_view(['POST'])
@@ -124,7 +131,7 @@ def dashboard_stats(request):
     # Maintenance requests
     open_maintenance = MaintenanceRequest.objects.filter(
         unit__property__owner=request.user
-    ).exclude(status='Resolved').count()
+    ).exclude(status='Completed').count()
 
     return Response({
         'total_properties': total_properties,
@@ -139,8 +146,13 @@ def dashboard_stats(request):
 
 
 class PropertyViewSet(viewsets.ModelViewSet):
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'address', 'property_type', 'description']
+    ordering_fields = ['name', 'created_at', 'property_type', 'total_units']
+    ordering = ['-created_at']
+
     def get_queryset(self):
-        return Property.objects.filter(owner=self.request.user).order_by('-created_at')
+        return Property.objects.filter(owner=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -152,8 +164,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
 
 class UnitViewSet(viewsets.ModelViewSet):
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['unit_number', 'status']
+    ordering_fields = ['unit_number', 'bedrooms', 'price_rent', 'status', 'created_at']
+    ordering = ['-created_at']
+
     def get_queryset(self):
-        return Unit.objects.filter(property__owner=self.request.user).order_by('-created_at')
+        return Unit.objects.filter(property__owner=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -161,7 +178,6 @@ class UnitViewSet(viewsets.ModelViewSet):
         return UnitSerializer
 
     def perform_create(self, serializer):
-        # Validate the property belongs to the current user
         property_id = serializer.validated_data.get('property_id')
         try:
             prop = Property.objects.get(id=property_id, owner=self.request.user)
@@ -171,8 +187,13 @@ class UnitViewSet(viewsets.ModelViewSet):
 
 
 class TenantViewSet(viewsets.ModelViewSet):
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'phone', 'email']
+    ordering_fields = ['name', 'monthly_rent', 'lease_expiry_date', 'created_at']
+    ordering = ['-created_at']
+
     def get_queryset(self):
-        return Tenant.objects.filter(unit__property__owner=self.request.user).order_by('-created_at')
+        return Tenant.objects.filter(unit__property__owner=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -181,7 +202,6 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = serializer.save()
-        # Update unit status to Occupied
         unit = tenant.unit
         unit.status = 'Occupied'
         unit.save()
@@ -189,7 +209,6 @@ class TenantViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         old_tenant = self.get_object()
         tenant = serializer.save()
-        # If tenant is deactivated, update unit status
         if not tenant.is_active:
             unit = tenant.unit
             unit.status = 'Available'
@@ -197,8 +216,13 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['month_for', 'reference', 'payment_method', 'notes']
+    ordering_fields = ['amount', 'payment_date', 'created_at']
+    ordering = ['-payment_date']
+
     def get_queryset(self):
-        return Payment.objects.filter(tenant__unit__property__owner=request.user).order_by('-payment_date')
+        return Payment.objects.filter(tenant__unit__property__owner=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -207,10 +231,22 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
 
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description', 'status', 'priority', 'reported_by']
+    ordering_fields = ['priority', 'status', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+
     def get_queryset(self):
-        return MaintenanceRequest.objects.filter(unit__property__owner=self.request.user).order_by('-created_at')
+        return MaintenanceRequest.objects.filter(unit__property__owner=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
             return MaintenanceRequestListSerializer
         return MaintenanceRequestSerializer
+
+    def perform_create(self, serializer):
+        reported_by = serializer.validated_data.get('reported_by')
+        if not reported_by:
+            user = self.request.user
+            reported_by = user.get_full_name() or user.username
+        serializer.save(reported_by=reported_by)

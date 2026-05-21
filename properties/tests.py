@@ -104,15 +104,15 @@ class MultiUserIsolationTests(TestCase):
         self.client.force_authenticate(user=self.user1)
         response = self.client.get('/api/properties/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['name'], 'Property 1')
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['name'], 'Property 1')
 
     def test_user2_sees_only_own_properties(self):
         self.client.force_authenticate(user=self.user2)
         response = self.client.get('/api/properties/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['name'], 'Property 2')
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['name'], 'Property 2')
 
     def test_user1_cannot_see_user2_property_detail(self):
         self.client.force_authenticate(user=self.user1)
@@ -147,7 +147,7 @@ class PropertyCRUDTests(TestCase):
         Property.objects.create(name='P2', address='A2', property_type='Condo', owner=self.user)
         response = self.client.get('/api/properties/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data['count'], 2)
 
     def test_delete_property(self):
         prop = Property.objects.create(name='ToDelete', address='A1', property_type='House', owner=self.user)

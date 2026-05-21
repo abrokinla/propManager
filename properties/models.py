@@ -40,12 +40,14 @@ class Property(models.Model):
         ('Commercial', 'Commercial'),
         ('Villa', 'Villa'),
         ('Townhouse', 'Townhouse'),
+        ('Studio', 'Studio'),
     ]
 
     name = models.CharField(max_length=200)
     address = models.TextField()
     property_type = models.CharField(max_length=50, choices=PROPERTY_TYPES)
     description = models.TextField(blank=True)
+    total_units = models.PositiveIntegerField(default=1)
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -60,6 +62,7 @@ class Unit(models.Model):
         ('Occupied', 'Occupied'),
         ('Maintenance', 'Maintenance'),
         ('Unavailable', 'Unavailable'),
+        ('Under Maintenance', 'Under Maintenance'),
     ]
 
     property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='units')
@@ -81,14 +84,14 @@ class Unit(models.Model):
 class Tenant(models.Model):
     unit = models.OneToOneField(Unit, on_delete=models.CASCADE, related_name='tenant')
     name = models.CharField(max_length=200)
-    phone = models.CharField(max_length=20)
-    email = models.EmailField()
+    phone = models.CharField(max_length=20, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
     address = models.TextField(blank=True)
     monthly_rent = models.DecimalField(max_digits=10, decimal_places=2)
-    lease_start_date = models.DateField()
+    lease_start_date = models.DateField(null=True, blank=True)
     lease_renewal_date = models.DateField(null=True, blank=True)
-    lease_expiry_date = models.DateField()
-    move_in_date = models.DateField()
+    lease_expiry_date = models.DateField(null=True, blank=True)
+    move_in_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -111,6 +114,7 @@ class Payment(models.Model):
     payment_date = models.DateField()
     payment_method = models.CharField(max_length=50, choices=PAYMENT_METHODS)
     month_for = models.CharField(max_length=50)  # e.g., "May 2024"
+    reference = models.CharField(max_length=200, blank=True, default='')
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -126,16 +130,16 @@ class MaintenanceRequest(models.Model):
     ]
 
     STATUS_CHOICES = [
-        ('Reported', 'Reported'),
+        ('Open', 'Open'),
         ('In Progress', 'In Progress'),
-        ('Resolved', 'Resolved'),
+        ('Completed', 'Completed'),
     ]
 
     unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name='maintenance_requests')
     title = models.CharField(max_length=200)
     description = models.TextField()
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='Medium')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Reported')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Open')
     reported_by = models.CharField(max_length=200)
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
