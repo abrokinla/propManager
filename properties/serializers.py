@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest
+from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -99,20 +99,30 @@ class UnitListSerializer(serializers.ModelSerializer):
 class TenantSerializer(serializers.ModelSerializer):
     unit = UnitListSerializer(read_only=True)
     unit_id = serializers.IntegerField(write_only=True)
+    unit_number = serializers.SerializerMethodField()
+    property_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenant
-        fields = ['id', 'unit', 'unit_id', 'name', 'phone', 'email', 'address', 'monthly_rent',
+        fields = ['id', 'unit', 'unit_id', 'name', 'phone', 'email', 'address', 'annual_rent',
+                  'tenancy_status', 'unit_number', 'property_name',
                   'lease_start_date', 'lease_renewal_date', 'lease_expiry_date', 'move_in_date',
                   'is_active', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
         extra_kwargs = {
             'phone': {'required': False, 'allow_blank': True},
             'email': {'required': False, 'allow_blank': True},
+            'annual_rent': {'required': False, 'allow_null': True},
             'lease_start_date': {'required': False, 'allow_null': True},
             'lease_expiry_date': {'required': False, 'allow_null': True},
             'move_in_date': {'required': False, 'allow_null': True},
         }
+
+    def get_unit_number(self, obj):
+        return obj.unit.unit_number
+
+    def get_property_name(self, obj):
+        return obj.unit.property.name
 
 
 class TenantListSerializer(serializers.ModelSerializer):
@@ -121,7 +131,8 @@ class TenantListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ['id', 'name', 'email', 'phone', 'unit_number', 'property_name', 'monthly_rent', 'lease_expiry_date', 'is_active']
+        fields = ['id', 'name', 'email', 'phone', 'unit_number', 'property_name', 'annual_rent',
+                  'tenancy_status', 'lease_expiry_date', 'is_active']
 
     def get_unit_number(self, obj):
         return obj.unit.unit_number
@@ -133,11 +144,25 @@ class TenantListSerializer(serializers.ModelSerializer):
 class PaymentSerializer(serializers.ModelSerializer):
     tenant = TenantListSerializer(read_only=True)
     tenant_id = serializers.IntegerField(write_only=True)
+    tenant_name = serializers.SerializerMethodField()
+    unit_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ['id', 'tenant', 'tenant_id', 'amount', 'payment_date', 'payment_method', 'month_for', 'reference', 'notes', 'created_at']
+        fields = ['id', 'tenant', 'tenant_id', 'tenant_name', 'unit_number', 'amount',
+                  'payment_date', 'payment_method', 'period_start', 'period_end',
+                  'years_covered', 'reference', 'notes', 'created_at']
         read_only_fields = ['created_at']
+        extra_kwargs = {
+            'period_start': {'required': False, 'allow_null': True},
+            'period_end': {'required': False, 'allow_null': True},
+        }
+
+    def get_tenant_name(self, obj):
+        return obj.tenant.name
+
+    def get_unit_number(self, obj):
+        return obj.tenant.unit.unit_number
 
 
 class PaymentListSerializer(serializers.ModelSerializer):
@@ -146,7 +171,8 @@ class PaymentListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Payment
-        fields = ['id', 'tenant_name', 'unit_number', 'amount', 'payment_date', 'payment_method', 'month_for', 'reference']
+        fields = ['id', 'tenant_name', 'unit_number', 'amount', 'payment_date',
+                  'payment_method', 'period_start', 'period_end', 'years_covered', 'reference']
 
     def get_tenant_name(self, obj):
         return obj.tenant.name
@@ -182,3 +208,67 @@ class MaintenanceRequestListSerializer(serializers.ModelSerializer):
 
     def get_property_name(self, obj):
         return obj.unit.property.name
+
+
+class TenancyDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenancyDocument
+        fields = ['id', 'tenant', 'document_type', 'status', 'document_data', 'file_url',
+                  'signed_file_url', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
+
+
+class TenancyDocumentDetailSerializer(serializers.ModelSerializer):
+    tenant_name = serializers.SerializerMethodField()
+    property_name = serializers.SerializerMethodField()
+    unit_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenancyDocument
+        fields = ['id', 'tenant', 'tenant_name', 'property_name', 'unit_number',
+                  'document_type', 'status', 'document_data', 'file_url',
+                  'signed_file_url', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
+        read_only_fields = fields
+
+    def get_tenant_name(self, obj):
+        return obj.tenant.name
+
+    def get_property_name(self, obj):
+        return obj.tenant.unit.property.name
+
+    def get_unit_number(self, obj):
+        return obj.tenant.unit.unit_number
+
+
+class ReminderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Reminder
+        fields = ['id', 'tenant', 'channel', 'reminder_type', 'sent_at', 'delivery_status', 'message']
+        read_only_fields = ['id', 'sent_at']
+
+
+class QuitNoticeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuitNotice
+        fields = ['id', 'tenant', 'notice_date', 'effective_date', 'reason', 'status',
+                  'document_url', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class DashboardPaymentSerializer(serializers.Serializer):
+    tenant = serializers.CharField()
+    amount = serializers.FloatField()
+    date = serializers.DateField()
+    period_start = serializers.DateField()
+    period_end = serializers.DateField()
+
+
+class DashboardStatsSerializer(serializers.Serializer):
+    total_properties = serializers.IntegerField()
+    total_units = serializers.IntegerField()
+    occupied_units = serializers.IntegerField()
+    occupancy_rate = serializers.FloatField()
+    total_revenue = serializers.FloatField()
+    upcoming_lease_expirations = serializers.ListField()
+    recent_payments = DashboardPaymentSerializer(many=True)
+    open_maintenance = serializers.IntegerField()

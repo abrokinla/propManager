@@ -1,19 +1,26 @@
 from rest_framework import viewsets, status, serializers, filters
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 from django.db.models import Count, Sum, Q
+from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
     MaintenanceRequestSerializer, MaintenanceRequestListSerializer,
-    RegisterSerializer, UserSerializer, UserProfileSerializer
+    RegisterSerializer, UserSerializer, UserProfileSerializer,
+    TenancyDocumentSerializer, TenancyDocumentDetailSerializer,
+    ReminderSerializer, QuitNoticeSerializer,
 )
+from .services.document_service import send_tenancy_document
+from .services.notice_service import issue_quit_notice
+from .services.reminder_service import send_reminder as send_reminder_svc
+from .services.storage_service import upload_file_bytes
 
 
 @api_view(['GET'])
@@ -78,25 +85,16 @@ def profile_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
-    # Total properties
     total_properties = Property.objects.filter(owner=request.user).count()
-
-    # Total units
     total_units = Unit.objects.filter(property__owner=request.user).count()
-
-    # Occupied units
     occupied_units = Unit.objects.filter(property__owner=request.user, status='Occupied').count()
-
-    # Occupancy rate
     occupancy_rate = (occupied_units / total_units * 100) if total_units > 0 else 0
 
-    # Monthly revenue (sum of all active tenants' monthly rent)
-    monthly_revenue = Tenant.objects.filter(
-        unit__property__owner=request.user,
-        is_active=True
-    ).aggregate(total=Sum('monthly_rent'))['total'] or 0
+    total_revenue = Payment.objects.filter(
+        tenant__unit__property__owner=request.user,
+        payment_date__gte=datetime.now().date() - timedelta(days=365),
+    ).aggregate(total=Sum('amount'))['total'] or 0
 
-    # Upcoming lease expirations (next 30 days)
     thirty_days_later = datetime.now().date() + timedelta(days=30)
     upcoming_expirations = Tenant.objects.filter(
         unit__property__owner=request.user,
@@ -105,30 +103,25 @@ def dashboard_stats(request):
         is_active=True
     ).select_related('unit', 'unit__property')
 
-    upcoming_list = []
-    for tenant in upcoming_expirations:
-        upcoming_list.append({
-            'tenant': tenant.name,
-            'unit': tenant.unit.unit_number,
-            'property': tenant.unit.property.name,
-            'expiry_date': tenant.lease_expiry_date,
-        })
+    upcoming_list = [{
+        'tenant': t.name,
+        'unit': t.unit.unit_number,
+        'property': t.unit.property.name,
+        'expiry_date': t.lease_expiry_date,
+    } for t in upcoming_expirations]
 
-    # Recent payments
     recent_payments = Payment.objects.filter(
         tenant__unit__property__owner=request.user
     ).order_by('-payment_date')[:5]
 
-    payments_list = []
-    for payment in recent_payments:
-        payments_list.append({
-            'tenant': payment.tenant.name,
-            'amount': float(payment.amount),
-            'date': payment.payment_date,
-            'month_for': payment.month_for,
-        })
+    payments_list = [{
+        'tenant': p.tenant.name,
+        'amount': float(p.amount),
+        'date': p.payment_date,
+        'period_start': p.period_start,
+        'period_end': p.period_end,
+    } for p in recent_payments]
 
-    # Maintenance requests
     open_maintenance = MaintenanceRequest.objects.filter(
         unit__property__owner=request.user
     ).exclude(status='Completed').count()
@@ -138,7 +131,7 @@ def dashboard_stats(request):
         'total_units': total_units,
         'occupied_units': occupied_units,
         'occupancy_rate': round(occupancy_rate, 1),
-        'monthly_revenue': float(monthly_revenue),
+        'total_revenue': float(total_revenue),
         'upcoming_lease_expirations': upcoming_list,
         'recent_payments': payments_list,
         'open_maintenance': open_maintenance,
@@ -189,11 +182,13 @@ class UnitViewSet(viewsets.ModelViewSet):
 class TenantViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'phone', 'email']
-    ordering_fields = ['name', 'monthly_rent', 'lease_expiry_date', 'created_at']
+    ordering_fields = ['name', 'annual_rent', 'lease_expiry_date', 'created_at', 'tenancy_status']
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return Tenant.objects.filter(unit__property__owner=self.request.user)
+        return Tenant.objects.filter(unit__property__owner=self.request.user).select_related(
+            'unit', 'unit__property'
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -214,10 +209,85 @@ class TenantViewSet(viewsets.ModelViewSet):
             unit.status = 'Available'
             unit.save()
 
+    @action(detail=True, methods=['get'])
+    def documents(self, request, pk=None):
+        tenant = self.get_object()
+        docs = tenant.documents.all()
+        serializer = TenancyDocumentSerializer(docs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def send_document(self, request, pk=None):
+        tenant = self.get_object()
+        document_data = request.data.get('document_data', {})
+        document = TenancyDocument.objects.create(
+            tenant=tenant,
+            document_data=document_data,
+            status='draft',
+        )
+        upload_base_url = request.data.get(
+            'upload_base_url',
+            request.build_absolute_uri('/')[:-1]
+        )
+        document = send_tenancy_document(document, upload_base_url)
+        serializer = TenancyDocumentSerializer(document)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='documents/(?P<doc_id>[^/.]+)/upload-signed')
+    def upload_signed(self, request, pk=None, doc_id=None):
+        tenant = self.get_object()
+        document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+        signed_file = request.FILES.get('signed_file')
+        if not signed_file:
+            return Response({'error': 'signed_file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        file_bytes = signed_file.read()
+        url = upload_file_bytes(file_bytes, signed_file.name, signed_file.content_type)
+        document.signed_file_url = url
+        document.status = 'signed'
+        document.signed_at = datetime.now()
+        document.save()
+        tenant.tenancy_status = 'document_signed'
+        tenant.save(update_fields=['tenancy_status'])
+        serializer = TenancyDocumentSerializer(document)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def quit_notice(self, request, pk=None):
+        tenant = self.get_object()
+        reason = request.data.get('reason')
+        notice = issue_quit_notice(tenant, reason)
+        serializer = QuitNoticeSerializer(notice)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def quit_notices(self, request, pk=None):
+        tenant = self.get_object()
+        notices = tenant.quit_notices.all()
+        serializer = QuitNoticeSerializer(notices, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def send_reminder(self, request, pk=None):
+        tenant = self.get_object()
+        reminder_type = request.data.get('reminder_type')
+        channel = request.data.get('channel', 'email')
+        if reminder_type not in ['lease_expiry', 'rent_due', 'document_sign']:
+            return Response({'error': 'Invalid reminder_type'}, status=status.HTTP_400_BAD_REQUEST)
+        reminder = send_reminder_svc(tenant, reminder_type, channel)
+        serializer = ReminderSerializer(reminder)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def reminders(self, request, pk=None):
+        tenant = self.get_object()
+        reminders = tenant.reminders.all()
+        serializer = ReminderSerializer(reminders, many=True)
+        return Response(serializer.data)
+
 
 class PaymentViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['month_for', 'reference', 'payment_method', 'notes']
+    search_fields = ['reference', 'payment_method', 'notes']
     ordering_fields = ['amount', 'payment_date', 'created_at']
     ordering = ['-payment_date']
 
@@ -250,3 +320,34 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
             user = self.request.user
             reported_by = user.get_full_name() or user.username
         serializer.save(reported_by=reported_by)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_document_detail(request, token):
+    document = get_object_or_404(TenancyDocument, access_token=token)
+    if document.status == 'signed':
+        return Response({'error': 'Document already signed'}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = TenancyDocumentDetailSerializer(document)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def public_document_sign(request, token):
+    document = get_object_or_404(TenancyDocument, access_token=token)
+    if document.status == 'signed':
+        return Response({'error': 'Document already signed'}, status=status.HTTP_400_BAD_REQUEST)
+    signed_file = request.FILES.get('signed_file')
+    if not signed_file:
+        return Response({'error': 'signed_file is required'}, status=status.HTTP_400_BAD_REQUEST)
+    file_bytes = signed_file.read()
+    url = upload_file_bytes(file_bytes, signed_file.name, signed_file.content_type)
+    document.signed_file_url = url
+    document.status = 'signed'
+    document.signed_at = datetime.now()
+    document.save()
+    tenant = document.tenant
+    tenant.tenancy_status = 'document_signed'
+    tenant.save(update_fields=['tenancy_status'])
+    return Response({'status': 'signed', 'signed_file_url': url})

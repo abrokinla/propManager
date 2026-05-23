@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
+    'storages',
     'properties',
 ]
 
@@ -160,3 +161,39 @@ LOGGING = {
         'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
     },
 }
+
+# File storage (Cloudflare R2 via S3-compatible API)
+R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID')
+R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY')
+R2_BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'propmanager-documents')
+R2_ENDPOINT_URL = os.getenv('R2_ENDPOINT_URL')
+
+if R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL:
+    AWS_ACCESS_KEY_ID = R2_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY = R2_SECRET_ACCESS_KEY
+    AWS_STORAGE_BUCKET_NAME = R2_BUCKET_NAME
+    AWS_S3_ENDPOINT_URL = R2_ENDPOINT_URL
+    AWS_S3_REGION_NAME = 'auto'
+    AWS_DEFAULT_ACL = 'public-read'
+    AWS_QUERYSTRING_AUTH = False
+    AWS_S3_SIGNATURE_VERSION = 's3v4'
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+else:
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Email (SendGrid)
+SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+if SENDGRID_API_KEY:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = 'smtp.sendgrid.net'
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = 'apikey'
+    EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@propmanager.com')
