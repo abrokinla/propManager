@@ -43,7 +43,7 @@ class PropertySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'description', 'total_units', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'address', 'property_type', 'description', 'total_units', 'image_url', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_units_count(self, obj):
@@ -56,7 +56,7 @@ class PropertyListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'total_units', 'owner', 'units_count', 'created_at']
+        fields = ['id', 'name', 'address', 'property_type', 'total_units', 'image_url', 'owner', 'units_count', 'created_at']
 
     def get_units_count(self, obj):
         return obj.units.count()

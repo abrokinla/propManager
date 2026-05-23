@@ -50,6 +50,7 @@ class Property(models.Model):
     property_type = models.CharField(max_length=50, choices=PROPERTY_TYPES)
     description = models.TextField(blank=True)
     total_units = models.PositiveIntegerField(default=1)
+    image_url = models.URLField(max_length=500, blank=True, default='')
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
