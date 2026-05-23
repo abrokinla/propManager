@@ -9,7 +9,8 @@ from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
     PaymentViewSet, MaintenanceRequestViewSet,
     register_view, login_view, dashboard_stats, profile_view,
-    health_check, public_document_detail, public_document_sign
+    health_check, public_document_detail, public_document_sign,
+    upload_image,
 )
 
 router = DefaultRouter()
@@ -30,4 +31,5 @@ urlpatterns = [
     path('api/profile/', profile_view, name='profile'),
     path('api/public/document/<uuid:token>/', public_document_detail, name='public-document-detail'),
     path('api/public/document/<uuid:token>/sign/', public_document_sign, name='public-document-sign'),
+    path('api/upload-image/', upload_image, name='upload-image'),
 ]

@@ -139,6 +139,18 @@ def dashboard_stats(request):
     })
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_image(request):
+    image = request.FILES.get('image')
+    if not image:
+        return Response({'error': 'image file is required'}, status=400)
+    if not image.content_type.startswith('image/'):
+        return Response({'error': 'File must be an image'}, status=400)
+    url = upload_file_bytes(image.read(), image.name, image.content_type, folder='properties')
+    return Response({'image_url': url})
+
+
 class PropertyViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'address', 'property_type', 'description']
