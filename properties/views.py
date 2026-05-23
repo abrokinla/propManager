@@ -87,8 +87,9 @@ def profile_view(request):
 def dashboard_stats(request):
     total_properties = Property.objects.filter(owner=request.user).count()
     total_units = Unit.objects.filter(property__owner=request.user).count()
-    occupied_units = Unit.objects.filter(property__owner=request.user, status='Occupied').count()
-    occupancy_rate = (occupied_units / total_units * 100) if total_units > 0 else 0
+    total_capacity = Property.objects.filter(owner=request.user).aggregate(total=Sum('total_units'))['total'] or 0
+    active_tenants = Tenant.objects.filter(unit__property__owner=request.user, is_active=True).count()
+    occupancy_rate = (active_tenants / total_capacity * 100) if total_capacity > 0 else 0
 
     total_revenue = Payment.objects.filter(
         tenant__unit__property__owner=request.user,
@@ -129,7 +130,7 @@ def dashboard_stats(request):
     return Response({
         'total_properties': total_properties,
         'total_units': total_units,
-        'occupied_units': occupied_units,
+        'occupied_units': active_tenants,
         'occupancy_rate': round(occupancy_rate, 1),
         'total_revenue': float(total_revenue),
         'upcoming_lease_expirations': upcoming_list,
@@ -196,18 +197,35 @@ class TenantViewSet(viewsets.ModelViewSet):
         return TenantSerializer
 
     def perform_create(self, serializer):
+        unit = serializer.validated_data.get('unit_id')
+        try:
+            unit_obj = Unit.objects.select_related('property').get(id=unit)
+        except Unit.DoesNotExist:
+            raise serializers.ValidationError({'unit_id': 'Unit not found.'})
+        property_obj = unit_obj.property
+        active_count = Tenant.objects.filter(unit__property=property_obj, is_active=True).count()
+        if active_count >= property_obj.total_units:
+            raise serializers.ValidationError(
+                f'Property "{property_obj.name}" has reached its capacity of {property_obj.total_units} active tenant(s). '
+                'Mark an existing tenant as inactive before adding a new one.'
+            )
         tenant = serializer.save()
-        unit = tenant.unit
-        unit.status = 'Occupied'
-        unit.save()
+        tenant.unit.status = 'Occupied'
+        tenant.unit.save(update_fields=['status'])
 
     def perform_update(self, serializer):
         old_tenant = self.get_object()
         tenant = serializer.save()
         if not tenant.is_active:
-            unit = tenant.unit
-            unit.status = 'Available'
-            unit.save()
+            tenant.unit.status = 'Available'
+            tenant.unit.save(update_fields=['status'])
+        elif tenant.is_active and not old_tenant.is_active:
+            property_obj = tenant.unit.property
+            active_count = Tenant.objects.filter(unit__property=property_obj, is_active=True).count()
+            if active_count >= property_obj.total_units:
+                raise serializers.ValidationError(
+                    f'Property "{property_obj.name}" has reached its capacity of {property_obj.total_units} active tenant(s).'
+                )
 
     @action(detail=True, methods=['get'])
     def documents(self, request, pk=None):
