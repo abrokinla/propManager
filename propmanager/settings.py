@@ -25,8 +25,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'cloudinary',
     'django_filters',
-    'storages',
     'properties',
 ]
 
@@ -162,22 +162,13 @@ LOGGING = {
     },
 }
 
-# File storage (Cloudflare R2 via S3-compatible API)
-R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID')
-R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY')
-R2_BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'propmanager-documents')
-R2_ENDPOINT_URL = os.getenv('R2_ENDPOINT_URL')
+# File storage (Cloudinary)
+CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
+CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY')
+CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET')
 
-if R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL:
-    AWS_ACCESS_KEY_ID = R2_ACCESS_KEY_ID
-    AWS_SECRET_ACCESS_KEY = R2_SECRET_ACCESS_KEY
-    AWS_STORAGE_BUCKET_NAME = R2_BUCKET_NAME
-    AWS_S3_ENDPOINT_URL = R2_ENDPOINT_URL
-    AWS_S3_REGION_NAME = 'auto'
-    AWS_DEFAULT_ACL = 'public-read'
-    AWS_QUERYSTRING_AUTH = False
-    AWS_S3_SIGNATURE_VERSION = 's3v4'
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 else:
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 

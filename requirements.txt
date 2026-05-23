@@ -12,7 +12,7 @@ PyJWT==2.12.1
 python-dotenv==1.2.2
 sqlparse==0.5.5
 whitenoise==6.12.0
-boto3==1.38.0
-django-storages==1.14.5
 sendgrid==6.11.0
 reportlab==4.5.1
+cloudinary==1.42.0
+django-cloudinary-storage==0.3.0
