@@ -51,6 +51,9 @@ class Property(models.Model):
     description = models.TextField(blank=True)
     total_units = models.PositiveIntegerField(default=1)
     image_url = models.URLField(max_length=500, blank=True, default='')
+    is_published = models.BooleanField(default=False)
+    amenities = models.TextField(blank=True, default='')
+    nearby_places = models.TextField(blank=True, default='')
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -86,7 +89,9 @@ class Unit(models.Model):
 
 class Tenant(models.Model):
     TENANCY_STATUS_CHOICES = [
-        ('pending_document', 'Pending Document'),
+        ('invited', 'Invited'),
+        ('profile_pending', 'Profile Pending'),
+        ('document_pending', 'Document Pending'),
         ('document_sent', 'Document Sent'),
         ('document_signed', 'Document Signed'),
         ('active', 'Active'),
@@ -95,12 +100,29 @@ class Tenant(models.Model):
     ]
 
     unit = models.OneToOneField(Unit, on_delete=models.CASCADE, related_name='tenant')
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tenant_profile')
     name = models.CharField(max_length=200)
     phone = models.CharField(max_length=20, blank=True, default='')
     email = models.EmailField(blank=True, default='')
-    address = models.TextField(blank=True)
+    address = models.TextField(blank=True, default='')
     annual_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    tenancy_status = models.CharField(max_length=20, choices=TENANCY_STATUS_CHOICES, default='pending_document')
+    tenancy_status = models.CharField(max_length=20, choices=TENANCY_STATUS_CHOICES, default='invited')
+    passport_photo = models.URLField(max_length=500, blank=True, default='')
+    government_id = models.URLField(max_length=500, blank=True, default='')
+    occupation = models.CharField(max_length=200, blank=True, default='')
+    employer_name = models.CharField(max_length=200, blank=True, default='')
+    employer_address = models.TextField(blank=True, default='')
+    next_of_kin_name = models.CharField(max_length=200, blank=True, default='')
+    next_of_kin_phone = models.CharField(max_length=20, blank=True, default='')
+    next_of_kin_email = models.EmailField(blank=True, default='')
+    next_of_kin_address = models.TextField(blank=True, default='')
+    emergency_contact_name = models.CharField(max_length=200, blank=True, default='')
+    emergency_contact_phone = models.CharField(max_length=20, blank=True, default='')
+    guarantor_name = models.CharField(max_length=200, blank=True, default='')
+    guarantor_phone = models.CharField(max_length=20, blank=True, default='')
+    guarantor_email = models.EmailField(blank=True, default='')
+    guarantor_address = models.TextField(blank=True, default='')
+    profile_completed = models.BooleanField(default=False)
     lease_start_date = models.DateField(null=True, blank=True)
     lease_renewal_date = models.DateField(null=True, blank=True)
     lease_expiry_date = models.DateField(null=True, blank=True)
@@ -169,8 +191,10 @@ class Reminder(models.Model):
     REMINDER_TYPE_CHOICES = [
         ('lease_expiry', 'Lease Expiry'),
         ('rent_due', 'Rent Due'),
+        ('rent_renewal', 'Rent Renewal'),
         ('quit_notice', 'Quit Notice'),
         ('document_sign', 'Document Sign'),
+        ('tenant_invite', 'Tenant Invite'),
     ]
     DELIVERY_STATUS_CHOICES = [
         ('sent', 'Sent'),

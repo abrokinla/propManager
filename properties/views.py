@@ -4,10 +4,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
-from django.db.models import Count, Sum, Q
+from django.db.models import Count, F, Sum, Q
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
+import logging
+logger = logging.getLogger(__name__)
 from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
@@ -16,11 +18,15 @@ from .serializers import (
     RegisterSerializer, UserSerializer, UserProfileSerializer,
     TenancyDocumentSerializer, TenancyDocumentDetailSerializer,
     ReminderSerializer, QuitNoticeSerializer,
+    PublicPropertyListSerializer, PublicPropertyDetailSerializer,
+    TenantSelfSerializer, TenantProfileUpdateSerializer,
 )
 from .services.document_service import send_tenancy_document
 from .services.notice_service import issue_quit_notice
 from .services.reminder_service import send_reminder as send_reminder_svc
 from .services.storage_service import upload_file_bytes
+from .services.invitation_service import send_invitation, resend_invitation
+from .utils import generate_unit_prefix
 
 
 @api_view(['GET'])
@@ -151,6 +157,24 @@ def upload_image(request):
     return Response({'image_url': url})
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_properties_list(request):
+    props = Property.objects.filter(is_published=True).annotate(
+        active_count=Count('units__tenant', filter=Q(units__tenant__is_active=True))
+    ).filter(active_count__lt=F('total_units')).distinct()
+    serializer = PublicPropertyListSerializer(props, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_property_detail(request, pk):
+    prop = get_object_or_404(Property, pk=pk, is_published=True)
+    serializer = PublicPropertyDetailSerializer(prop)
+    return Response(serializer.data)
+
+
 class PropertyViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'address', 'property_type', 'description']
@@ -166,7 +190,24 @@ class PropertyViewSet(viewsets.ModelViewSet):
         return PropertySerializer
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        prop = serializer.save(owner=self.request.user)
+        prefix = generate_unit_prefix(prop.name)
+        existing_count = Unit.objects.filter(property=prop).count()
+        units = []
+        for i in range(1, prop.total_units + 1):
+            units.append(Unit(property=prop, unit_number=f"{prefix}{i:03d}"))
+        Unit.objects.bulk_create(units)
+
+    def perform_update(self, serializer):
+        prop = serializer.save()
+        prefix = generate_unit_prefix(prop.name)
+        existing_count = Unit.objects.filter(property=prop).count()
+        if prop.total_units > existing_count:
+            units = []
+            for i in range(existing_count + 1, prop.total_units + 1):
+                units.append(Unit(property=prop, unit_number=f"{prefix}{i:03d}"))
+            if units:
+                Unit.objects.bulk_create(units)
 
 
 class UnitViewSet(viewsets.ModelViewSet):
@@ -224,6 +265,12 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant = serializer.save()
         tenant.unit.status = 'Occupied'
         tenant.unit.save(update_fields=['status'])
+        if tenant.email:
+            frontend_url = self.request.data.get('frontend_url', None)
+            try:
+                send_invitation(tenant, frontend_url)
+            except Exception as e:
+                logger.exception(f"Failed to send invitation to tenant {tenant.id}: {e}")
 
     def perform_update(self, serializer):
         old_tenant = self.get_object()
@@ -301,7 +348,7 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant = self.get_object()
         reminder_type = request.data.get('reminder_type')
         channel = request.data.get('channel', 'email')
-        if reminder_type not in ['lease_expiry', 'rent_due', 'document_sign']:
+        if reminder_type not in ['lease_expiry', 'rent_due', 'document_sign', 'rent_renewal']:
             return Response({'error': 'Invalid reminder_type'}, status=status.HTTP_400_BAD_REQUEST)
         reminder = send_reminder_svc(tenant, reminder_type, channel)
         serializer = ReminderSerializer(reminder)
@@ -313,6 +360,18 @@ class TenantViewSet(viewsets.ModelViewSet):
         reminders = tenant.reminders.all()
         serializer = ReminderSerializer(reminders, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def resend_invite(self, request, pk=None):
+        tenant = self.get_object()
+        frontend_url = request.data.get('frontend_url', None)
+        try:
+            success = resend_invitation(tenant, frontend_url)
+            if success:
+                return Response({'status': 'invitation sent'})
+            return Response({'error': 'Failed to send invitation'}, status=500)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -381,3 +440,77 @@ def public_document_sign(request, token):
     tenant.tenancy_status = 'document_signed'
     tenant.save(update_fields=['tenancy_status'])
     return Response({'status': 'signed', 'signed_file_url': url})
+
+
+# ── Tenant Self-Service Endpoints ──────────────────────────────────────────
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def tenant_me(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    if request.method == 'GET':
+        serializer = TenantSelfSerializer(tenant)
+        return Response(serializer.data)
+    serializer = TenantProfileUpdateSerializer(tenant, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        if tenant.tenancy_status == 'invited':
+            tenant.tenancy_status = 'profile_pending'
+            tenant.save(update_fields=['tenancy_status'])
+        return Response(TenantSelfSerializer(tenant).data)
+    return Response(serializer.errors, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_complete_profile(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    tenant.profile_completed = True
+    if tenant.tenancy_status in ('invited', 'profile_pending'):
+        tenant.tenancy_status = 'document_pending'
+    tenant.save(update_fields=['profile_completed', 'tenancy_status'])
+    return Response(TenantSelfSerializer(tenant).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_sign_document(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    if document.status == 'signed':
+        return Response({'error': 'Document already signed'}, status=400)
+    document.status = 'signed'
+    document.signed_at = datetime.now()
+    document.save(update_fields=['status', 'signed_at'])
+    tenant.tenancy_status = 'document_signed'
+    tenant.save(update_fields=['tenancy_status'])
+    return Response({'status': 'signed', 'signed_at': document.signed_at})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_documents(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    docs = tenant.documents.all()
+    serializer = TenancyDocumentSerializer(docs, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_payments(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    payments = tenant.payments.all().order_by('-payment_date')
+    from .serializers import PaymentListSerializer
+    serializer = PaymentListSerializer(payments, many=True)
+    return Response(serializer.data)

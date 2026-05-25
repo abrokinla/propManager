@@ -37,6 +37,17 @@ def send_reminder(tenant, reminder_type: str, channel: str = 'email') -> Reminde
         """
         message = f"Document signing reminder sent to {tenant.email}"
 
+    elif reminder_type == 'rent_renewal':
+        subject = f"Rent Renewal Notice - {tenant.unit.property.name}"
+        html_body = f"""
+        <p>Dear {tenant.name},</p>
+        <p>Your tenancy at <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>) is due for renewal on <b>{tenant.lease_expiry_date}</b>.</p>
+        <p>Please contact your property manager to discuss renewal terms.</p>
+        <p>If no renewal is agreed, the lease will expire on {tenant.lease_expiry_date} and you will be required to vacate the premises.</p>
+        <p>Regards,<br/>PropManager</p>
+        """
+        message = f"Rent renewal notice sent to {tenant.email}, expires {tenant.lease_expiry_date}"
+
     else:
         raise ValueError(f"Unknown reminder type: {reminder_type}")
 
@@ -55,14 +66,14 @@ def send_reminder(tenant, reminder_type: str, channel: str = 'email') -> Reminde
 def send_due_reminders():
     today = date.today()
     sent = 0
+    active_statuses = ['active', 'document_signed']
 
-    # Lease expiry reminders at 30, 14, 7, and 0 days before expiry
     for days_before in [30, 14, 7, 0]:
         target_date = today + timedelta(days=days_before)
         tenants = Tenant.objects.filter(
             lease_expiry_date=target_date,
             is_active=True,
-            tenancy_status__in=['active', 'document_signed'],
+            tenancy_status__in=active_statuses,
         )
         for tenant in tenants:
             try:
@@ -71,5 +82,20 @@ def send_due_reminders():
                 logger.info(f"Lease expiry reminder sent to {tenant.name} ({days_before}d before)")
             except Exception as e:
                 logger.error(f"Failed to send lease expiry reminder to {tenant.name}: {e}")
+
+    for days_before in [90, 30]:
+        target_date = today + timedelta(days=days_before)
+        tenants = Tenant.objects.filter(
+            lease_expiry_date=target_date,
+            is_active=True,
+            tenancy_status__in=active_statuses,
+        )
+        for tenant in tenants:
+            try:
+                send_reminder(tenant, 'rent_renewal')
+                sent += 1
+                logger.info(f"Rent renewal notice sent to {tenant.name} ({days_before}d before)")
+            except Exception as e:
+                logger.error(f"Failed to send rent renewal notice to {tenant.name}: {e}")
 
     return sent

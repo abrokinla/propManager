@@ -11,6 +11,9 @@ from properties.views import (
     register_view, login_view, dashboard_stats, profile_view,
     health_check, public_document_detail, public_document_sign,
     upload_image,
+    public_properties_list, public_property_detail,
+    tenant_me, tenant_complete_profile, tenant_sign_document,
+    tenant_documents, tenant_payments,
 )
 
 router = DefaultRouter()
@@ -32,4 +35,11 @@ urlpatterns = [
     path('api/public/document/<uuid:token>/', public_document_detail, name='public-document-detail'),
     path('api/public/document/<uuid:token>/sign/', public_document_sign, name='public-document-sign'),
     path('api/upload-image/', upload_image, name='upload-image'),
+    path('api/public/properties/', public_properties_list, name='public-properties-list'),
+    path('api/public/properties/<int:pk>/', public_property_detail, name='public-property-detail'),
+    path('api/tenant/me/', tenant_me, name='tenant-me'),
+    path('api/tenant/me/complete-profile/', tenant_complete_profile, name='tenant-complete-profile'),
+    path('api/tenant/me/documents/', tenant_documents, name='tenant-documents'),
+    path('api/tenant/me/documents/<int:doc_id>/sign/', tenant_sign_document, name='tenant-sign-document'),
+    path('api/tenant/me/payments/', tenant_payments, name='tenant-payments'),
 ]

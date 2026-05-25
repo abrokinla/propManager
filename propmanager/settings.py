@@ -188,3 +188,5 @@ else:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@propmanager.com')
+
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
