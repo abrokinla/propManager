@@ -216,6 +216,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
 class UnitViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['property_id']
     search_fields = ['unit_number', 'status']
     ordering_fields = ['unit_number', 'bedrooms', 'price_rent', 'status', 'created_at']
     ordering = ['-created_at']
