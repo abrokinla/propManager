@@ -121,7 +121,7 @@ class PublicPropertyDetailSerializer(serializers.ModelSerializer):
 
 class UnitSerializer(serializers.ModelSerializer):
     property = PropertyListSerializer(read_only=True)
-    property_id = serializers.IntegerField(write_only=True)
+    property_id = serializers.IntegerField()
     tenant_name = serializers.SerializerMethodField()
 
     class Meta:
