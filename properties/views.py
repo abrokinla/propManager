@@ -145,6 +145,22 @@ def dashboard_stats(request):
     })
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_image(request):
+    """Upload an image to Cloudinary and return the URL"""
+    image = request.FILES.get('image')
+    if not image:
+        return Response({'error': 'No image file provided'}, status=400)
+    allowed_types = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    if image.content_type not in allowed_types:
+        return Response({'error': f'Invalid file type: {image.content_type}. Allowed: JPEG, PNG, WebP, GIF'}, status=400)
+    if image.size > 10 * 1024 * 1024:
+        return Response({'error': 'File too large. Maximum size is 10MB'}, status=400)
+    url = upload_file_bytes(image.read(), image.name, image.content_type, folder='properties')
+    return Response({'image_url': url})
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def public_properties_list(request):
