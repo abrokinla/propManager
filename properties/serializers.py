@@ -142,7 +142,7 @@ class UnitListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Unit
-        fields = ['id', 'property_name', 'unit_number', 'bedrooms', 'bathrooms', 'price_rent', 'status', 'tenant_name']
+        fields = ['id', 'property_id', 'property_name', 'unit_number', 'bedrooms', 'bathrooms', 'price_rent', 'status', 'tenant_name']
 
     def get_property_name(self, obj):
         return obj.property.name
