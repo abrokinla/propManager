@@ -23,9 +23,12 @@ router.register(r'tenants', TenantViewSet, basename='tenant')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'maintenance', MaintenanceRequestViewSet, basename='maintenance')
 
+resend_invite_view = TenantViewSet.as_view({'post': 'resend_invite'})
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/tenants/<int:pk>/resend-invite/', resend_invite_view, name='tenant-resend-invite'),
     path('api/register/', register_view, name='register'),
     path('api/login/', login_view, name='login'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
