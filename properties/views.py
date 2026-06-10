@@ -7,13 +7,14 @@ from django.contrib.auth.models import User
 from django.db.models import Count, F, Sum, Q
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
 from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
+    TenantPaymentSerializer,
     MaintenanceRequestSerializer, MaintenanceRequestListSerializer,
     RegisterSerializer, UserSerializer, UserProfileSerializer,
     TenancyDocumentSerializer, TenancyDocumentDetailSerializer,
@@ -22,6 +23,7 @@ from .serializers import (
     TenantSelfSerializer, TenantProfileUpdateSerializer,
 )
 from .services.document_service import send_tenancy_document
+from .services.pdf_service import generate_tenancy_agreement
 from .services.notice_service import issue_quit_notice
 from .services.reminder_service import send_reminder as send_reminder_svc
 from .services.storage_service import upload_file_bytes
@@ -387,7 +389,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 class PaymentViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['reference', 'payment_method', 'notes']
+    search_fields = ['reference', 'payment_method', 'notes', 'status']
     ordering_fields = ['amount', 'payment_date', 'created_at']
     ordering = ['-payment_date']
 
@@ -398,6 +400,32 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return PaymentListSerializer
         return PaymentSerializer
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        payment = self.get_object()
+        if payment.status != 'pending':
+            return Response({'error': f'Payment is already {payment.status}'}, status=400)
+        payment.status = 'approved'
+        payment.approved_by = request.user
+        payment.approved_at = datetime.now()
+        payment.save(update_fields=['status', 'approved_by', 'approved_at'])
+        serializer = self.get_serializer(payment)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        payment = self.get_object()
+        if payment.status != 'pending':
+            return Response({'error': f'Payment is already {payment.status}'}, status=400)
+        reason = request.data.get('reason', '')
+        payment.status = 'rejected'
+        payment.rejection_reason = reason
+        payment.approved_by = request.user
+        payment.approved_at = datetime.now()
+        payment.save(update_fields=['status', 'rejection_reason', 'approved_by', 'approved_at'])
+        serializer = self.get_serializer(payment)
+        return Response(serializer.data)
 
 
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
@@ -522,12 +550,45 @@ def tenant_sign_document(request, doc_id):
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
     if document.status == 'signed':
         return Response({'error': 'Document already signed'}, status=400)
+
+    signature_name = request.data.get('signature_name', tenant.name)
+    signed_date = date.today()
+
+    pdf_bytes = generate_tenancy_agreement(
+        document.document_data,
+        signature_name=signature_name,
+        signed_date=signed_date,
+    )
+
+    filename = f"tenancy_agreement_{tenant.id}_{signed_date.isoformat()}.pdf"
+    url = upload_file_bytes(pdf_bytes, filename, 'application/pdf', folder='signed_documents')
+
     document.status = 'signed'
+    document.signed_file_url = url
     document.signed_at = datetime.now()
-    document.save(update_fields=['status', 'signed_at'])
+    document.save(update_fields=['status', 'signed_file_url', 'signed_at'])
+
     tenant.tenancy_status = 'document_signed'
     tenant.save(update_fields=['tenancy_status'])
-    return Response({'status': 'signed', 'signed_at': document.signed_at})
+
+    agent = document.tenant.unit.property.owner
+    if agent and agent.email:
+        from .services.email_service import send_email
+        send_email(
+            to=agent.email,
+            subject=f'Tenancy Agreement Signed - {tenant.name}',
+            html_body=(
+                f'<p>Dear {agent.get_full_name() or agent.username},</p>'
+                f'<p>{tenant.name} has signed the tenancy agreement for '
+                f'{document.tenant.unit.property.name} - {document.tenant.unit.unit_number}.</p>'
+                f'<p>Signed on: {signed_date.strftime("%B %d, %Y")}</p>'
+                f'<p>The signed document is attached to this email.</p>'
+            ),
+            attachment_bytes=pdf_bytes,
+            attachment_filename=filename,
+        )
+
+    return Response({'status': 'signed', 'signed_file_url': url, 'signed_at': document.signed_at})
 
 
 @api_view(['GET'])
@@ -543,11 +604,38 @@ def tenant_documents(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def tenant_document_detail(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    serializer = TenancyDocumentDetailSerializer(document)
+    return Response(serializer.data)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
 def tenant_payments(request):
     if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
         return Response({'error': 'Not a tenant user'}, status=403)
     tenant = request.user.tenant_profile
-    payments = tenant.payments.all().order_by('-payment_date')
-    from .serializers import PaymentListSerializer
-    serializer = PaymentListSerializer(payments, many=True)
-    return Response(serializer.data)
+
+    if request.method == 'GET':
+        payments = tenant.payments.all().order_by('-payment_date')
+        serializer = TenantPaymentSerializer(payments, many=True)
+        return Response(serializer.data)
+
+    proof_url = ''
+    proof_file = request.FILES.get('proof')
+    if proof_file:
+        proof_url = upload_file_bytes(proof_file.read(), proof_file.name, proof_file.content_type, folder='payment_proofs')
+
+    data = request.data.copy()
+    if isinstance(data, dict):
+        data['proof_url'] = proof_url
+
+    serializer = TenantPaymentSerializer(data=data)
+    if serializer.is_valid():
+        serializer.save(tenant=tenant, proof_url=proof_url)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

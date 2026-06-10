@@ -13,7 +13,7 @@ from properties.views import (
     upload_image,
     public_properties_list, public_property_detail,
     tenant_me, tenant_complete_profile, tenant_sign_document,
-    tenant_documents, tenant_payments, tenant_login,
+    tenant_documents, tenant_document_detail, tenant_payments, tenant_login,
 )
 
 router = DefaultRouter()
@@ -44,6 +44,7 @@ urlpatterns = [
     path('api/tenant/me/', tenant_me, name='tenant-me'),
     path('api/tenant/me/complete-profile/', tenant_complete_profile, name='tenant-complete-profile'),
     path('api/tenant/me/documents/', tenant_documents, name='tenant-documents'),
+    path('api/tenant/me/documents/<int:doc_id>/', tenant_document_detail, name='tenant-document-detail'),
     path('api/tenant/me/documents/<int:doc_id>/sign/', tenant_sign_document, name='tenant-sign-document'),
     path('api/tenant/me/payments/', tenant_payments, name='tenant-payments'),
 ]

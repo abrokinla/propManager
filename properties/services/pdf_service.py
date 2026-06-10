@@ -11,7 +11,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 logger = logging.getLogger(__name__)
 
 
-def generate_tenancy_agreement(document_data: dict) -> bytes:
+def generate_tenancy_agreement(document_data: dict, signature_name: str = None, signed_date: date = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -21,6 +21,7 @@ def generate_tenancy_agreement(document_data: dict) -> bytes:
     normal = ParagraphStyle('Normal2', parent=styles['Normal'], fontSize=10, leading=15, spaceAfter=6)
     bold = ParagraphStyle('Bold2', parent=normal, fontName='Helvetica-Bold')
     small = ParagraphStyle('Small2', parent=normal, fontSize=9, textColor=HexColor('#555555'))
+    signature_style = ParagraphStyle('Signature', parent=normal, fontSize=12, leading=18, spaceAfter=4, textColor=HexColor('#1a1a2e'))
 
     elements = []
     elements.append(Paragraph("TENANCY AGREEMENT", title_style))
@@ -78,6 +79,17 @@ def generate_tenancy_agreement(document_data: dict) -> bytes:
     elements.append(Spacer(1, 20))
     elements.append(HRFlowable(width="100%", thickness=0.5, color=HexColor('#cccccc'), spaceAfter=10))
     elements.append(Paragraph(f"Generated on {date.today().strftime('%B %d, %Y')}", small))
+
+    if signature_name and signed_date:
+        elements.append(Spacer(1, 30))
+        elements.append(HRFlowable(width="60%", thickness=1, color=HexColor('#0f3460'), spaceAfter=10))
+        elements.append(Paragraph("SIGNATURE", ParagraphStyle('SigTitle', parent=title_style, fontSize=14, spaceAfter=10)))
+        elements.append(Spacer(1, 8))
+        elements.append(Paragraph(f"Signed by: <b>{signature_name}</b>", signature_style))
+        elements.append(Paragraph(f"Date: <b>{signed_date.strftime('%B %d, %Y')}</b>", signature_style))
+        elements.append(Spacer(1, 8))
+        elements.append(Paragraph("This document has been electronically signed by the tenant.", normal))
+        elements.append(HRFlowable(width="60%", thickness=0.5, color=HexColor('#cccccc'), spaceAfter=10))
 
     doc.build(elements)
     pdf_bytes = buf.getvalue()

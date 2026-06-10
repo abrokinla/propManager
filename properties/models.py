@@ -144,6 +144,12 @@ class Payment(models.Model):
         ('Cheque', 'Cheque'),
     ]
 
+    PAYMENT_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_date = models.DateField()
@@ -153,6 +159,11 @@ class Payment(models.Model):
     years_covered = models.IntegerField(default=1)
     reference = models.CharField(max_length=200, blank=True, default='')
     notes = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
+    proof_url = models.URLField(max_length=500, blank=True, default='')
+    approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='approved_payments')
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

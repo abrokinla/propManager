@@ -213,8 +213,9 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['id', 'tenant', 'tenant_id', 'tenant_name', 'unit_number', 'amount',
                   'payment_date', 'payment_method', 'period_start', 'period_end',
-                  'years_covered', 'reference', 'notes', 'created_at']
-        read_only_fields = ['created_at']
+                  'years_covered', 'reference', 'notes', 'status', 'proof_url',
+                  'approved_by', 'approved_at', 'rejection_reason', 'created_at']
+        read_only_fields = ['created_at', 'approved_by', 'approved_at']
         extra_kwargs = {
             'period_start': {'required': False, 'allow_null': True},
             'period_end': {'required': False, 'allow_null': True},
@@ -234,13 +235,22 @@ class PaymentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
         fields = ['id', 'tenant_name', 'unit_number', 'amount', 'payment_date',
-                  'payment_method', 'period_start', 'period_end', 'years_covered', 'reference']
+                  'payment_method', 'period_start', 'period_end', 'years_covered',
+                  'reference', 'status', 'proof_url']
 
     def get_tenant_name(self, obj):
         return obj.tenant.name
 
     def get_unit_number(self, obj):
         return obj.tenant.unit.unit_number
+
+
+class TenantPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ['id', 'amount', 'payment_date', 'payment_method', 'proof_url',
+                  'status', 'reference', 'notes', 'created_at']
+        read_only_fields = ['id', 'status', 'created_at']
 
 
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
