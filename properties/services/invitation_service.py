@@ -57,7 +57,7 @@ def send_invitation(tenant: Tenant, frontend_url: str = None) -> bool:
     <p>Your tenancy profile for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>) has been created.</p>
     <p>Please log in to complete your profile and review your tenancy agreement:</p>
     <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Complete Your Profile</a></p>
-    <p><b>Username:</b> {username}<br/>
+    <p><b>Email:</b> {tenant.email}<br/>
     <b>Password:</b> {password}</p>
     <p>Please change your password after logging in.</p>
     <p>Regards,<br/>PropManager</p>
@@ -92,7 +92,7 @@ def resend_invitation(tenant: Tenant, frontend_url: str = None) -> bool:
     <p>Dear {tenant.name},</p>
     <p>Here are your updated login details for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>):</p>
     <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Log In Now</a></p>
-    <p><b>Username:</b> {tenant.user.username}<br/>
+    <p><b>Email:</b> {tenant.email}<br/>
     <b>Password:</b> {password}</p>
     <p>Regards,<br/>PropManager</p>
     """

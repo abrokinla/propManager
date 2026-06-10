@@ -449,6 +449,30 @@ def public_document_sign(request, token):
 
 # ── Tenant Self-Service Endpoints ──────────────────────────────────────────
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tenant_login(request):
+    email = request.data.get('email')
+    password = request.data.get('password')
+    if not email or not password:
+        return Response({'error': 'Email and password are required'}, status=400)
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response({'error': 'Invalid credentials'}, status=401)
+    if not user.check_password(password):
+        return Response({'error': 'Invalid credentials'}, status=401)
+    if not hasattr(user, 'tenant_profile') or not user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    refresh = RefreshToken.for_user(user)
+    tenant = user.tenant_profile
+    return Response({
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+        'tenant': TenantSelfSerializer(tenant).data,
+    })
+
+
 @api_view(['GET', 'PUT'])
 @permission_classes([IsAuthenticated])
 def tenant_me(request):
