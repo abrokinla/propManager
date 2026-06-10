@@ -291,6 +291,12 @@ class TenantViewSet(viewsets.ModelViewSet):
                     f'Property "{property_obj.name}" has reached its capacity of {property_obj.total_units} active tenant(s).'
                 )
 
+    def perform_destroy(self, instance):
+        user = instance.user
+        instance.delete()
+        if user and not hasattr(user, 'profile'):
+            user.delete()
+
     @action(detail=True, methods=['get'])
     def documents(self, request, pk=None):
         tenant = self.get_object()
