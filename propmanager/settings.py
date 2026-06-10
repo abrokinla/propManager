@@ -174,9 +174,9 @@ cloudinary.config(
     secure=True,
 )
 
-# Email (SMTP — provider-agnostic)
-# Set EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD for your SMTP provider
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+# Email
+# Priority: Brevo REST API (BREVO_API_KEY) > SMTP > console fallback
+BREVO_API_KEY = os.getenv('BREVO_API_KEY', '')
 EMAIL_HOST = os.getenv('EMAIL_HOST', '')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
