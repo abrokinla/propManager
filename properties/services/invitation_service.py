@@ -32,36 +32,70 @@ def send_invitation(tenant: Tenant, frontend_url: str = None) -> bool:
         logger.info(f"Tenant {tenant.id} already has a user account")
         return True
 
-    password = _generate_password()
-    username = _generate_username(tenant.email or tenant.name)
-    first_name = (tenant.name or '').split()[0] if tenant.name else ''
-    last_name = ' '.join((tenant.name or '').split()[1:]) if tenant.name and len(tenant.name.split()) > 1 else ''
-
-    user = User.objects.create_user(
-        username=username,
-        email=tenant.email or '',
-        password=password,
-        first_name=first_name,
-        last_name=last_name,
-    )
-    tenant.user = user
-    tenant.tenancy_status = 'invited'
-    tenant.save(update_fields=['user', 'tenancy_status'])
-
     base_url = (frontend_url or getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')).rstrip('/')
     login_url = f"{base_url}/tenant/login"
+    existing = User.objects.filter(email=tenant.email).first()
 
-    subject = f"Welcome to PropManager - {tenant.unit.property.name}"
-    html_body = f"""
-    <p>Dear {tenant.name},</p>
-    <p>Your tenancy profile for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>) has been created.</p>
-    <p>Please log in to complete your profile and review your tenancy agreement:</p>
-    <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Complete Your Profile</a></p>
-    <p><b>Email:</b> {tenant.email}<br/>
-    <b>Password:</b> {password}</p>
-    <p>Please change your password after logging in.</p>
-    <p>Regards,<br/>PropManager</p>
-    """
+    if existing and hasattr(existing, 'tenant_profile') and existing.tenant_profile:
+        password = _generate_password()
+        existing.set_password(password)
+        existing.save(update_fields=['password'])
+        tenant.user = existing
+        tenant.tenancy_status = 'invited'
+        tenant.save(update_fields=['user', 'tenancy_status'])
+
+        subject = f"PropManager Login Details - {tenant.unit.property.name}"
+        html_body = f"""
+        <p>Dear {tenant.name},</p>
+        <p>Here are your updated login details for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>):</p>
+        <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Log In Now</a></p>
+        <p><b>Email:</b> {tenant.email}<br/>
+        <b>Password:</b> {password}</p>
+        <p>Please change your password after logging in.</p>
+        <p>Regards,<br/>PropManager</p>
+        """
+    elif existing:
+        tenant.user = existing
+        tenant.tenancy_status = 'invited'
+        tenant.save(update_fields=['user', 'tenancy_status'])
+
+        subject = f"Tenant Access Granted - {tenant.unit.property.name}"
+        html_body = f"""
+        <p>Dear {tenant.name},</p>
+        <p>You have been added as a tenant for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>).</p>
+        <p>Please log in at the tenant portal with your existing password to complete your profile:</p>
+        <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Go to Tenant Portal</a></p>
+        <p><b>Email:</b> {tenant.email}</p>
+        <p>Regards,<br/>PropManager</p>
+        """
+    else:
+        password = _generate_password()
+        username = _generate_username(tenant.email or tenant.name)
+        first_name = (tenant.name or '').split()[0] if tenant.name else ''
+        last_name = ' '.join((tenant.name or '').split()[1:]) if tenant.name and len(tenant.name.split()) > 1 else ''
+
+        user = User.objects.create_user(
+            username=username,
+            email=tenant.email or '',
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        tenant.user = user
+        tenant.tenancy_status = 'invited'
+        tenant.save(update_fields=['user', 'tenancy_status'])
+
+        subject = f"Welcome to PropManager - {tenant.unit.property.name}"
+        html_body = f"""
+        <p>Dear {tenant.name},</p>
+        <p>Your tenancy profile for <b>{tenant.unit.property.name}</b> (Unit <b>{tenant.unit.unit_number}</b>) has been created.</p>
+        <p>Please log in to complete your profile and review your tenancy agreement:</p>
+        <p><a href="{login_url}" style="display:inline-block;padding:12px 24px;background:#1a73e8;color:#fff;text-decoration:none;border-radius:6px;">Complete Your Profile</a></p>
+        <p><b>Email:</b> {tenant.email}<br/>
+        <b>Password:</b> {password}</p>
+        <p>Please change your password after logging in.</p>
+        <p>Regards,<br/>PropManager</p>
+        """
 
     success = send_email(tenant.email, subject, html_body)
 

@@ -456,10 +456,12 @@ def tenant_login(request):
     password = request.data.get('password')
     if not email or not password:
         return Response({'error': 'Email and password are required'}, status=400)
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
+
+    users = User.objects.filter(email=email)
+    if not users.exists():
         return Response({'error': 'Invalid credentials'}, status=401)
+    user = users.filter(tenant_profile__isnull=False).first() or users.first()
+
     if not user.check_password(password):
         return Response({'error': 'Invalid credentials'}, status=401)
     if not hasattr(user, 'tenant_profile') or not user.tenant_profile:
