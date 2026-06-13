@@ -32,6 +32,16 @@ from .services.invitation_service import send_invitation, resend_invitation
 from .utils import generate_unit_prefix
 
 
+def deep_merge(base, override):
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
@@ -442,8 +452,7 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
         except Property.DoesNotExist:
             raise serializers.ValidationError({'property_id': 'Property not found or not owned by you.'})
         template_data = serializer.validated_data.get('template_data', {})
-        merged = dict(DEFAULT_TEMPLATE_DATA)
-        merged.update(template_data)
+        merged = deep_merge(DEFAULT_TEMPLATE_DATA, template_data)
         serializer.save(property=prop, template_data=merged)
 
 
@@ -657,36 +666,34 @@ def tenant_agreement(request):
     except TenancyAgreementTemplate.DoesNotExist:
         return Response({'error': 'No agreement template set up for your property.'}, status=404)
 
-    data = dict(template.template_data)
-    data.setdefault('parties', {})
-    data['parties']['landlord_name'] = data.get('landlord_name', prop.owner.get_full_name() or prop.owner.username)
-    data['parties']['tenant_name'] = tenant.name
-    data['parties']['landlord_address'] = data.get('landlord_address', '')
-    data['parties']['landlord_phone'] = data.get('landlord_phone', '')
+    def _fmt_date(d):
+        if not d:
+            return ''
+        day = d.day
+        suffix = 'th' if 11 <= day <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+        return f"{day}{suffix} {d.strftime('%B, %Y')}"
 
-    data.setdefault('property', {})
-    data['property']['address'] = prop.address
+    data = dict(template.template_data)
+
+    if 'landlord' not in data or not isinstance(data.get('landlord'), dict):
+        data['landlord'] = {}
+    if not data['landlord'].get('name'):
+        data['landlord']['name'] = prop.owner.get_full_name() or prop.owner.username
+
+    if 'property' not in data or not isinstance(data.get('property'), dict):
+        data['property'] = {}
+    if not data['property'].get('address'):
+        data['property']['address'] = prop.address
     data['property']['unit_number'] = tenant.unit.unit_number
 
-    data.setdefault('financial_terms', {})
-    data['financial_terms']['annual_rent'] = str(tenant.annual_rent) if tenant.annual_rent else ''
-    data['financial_terms']['security_deposit'] = data.get('security_deposit', '')
-    data['financial_terms']['payment_due_date'] = data.get('payment_due_date', '')
-    data['financial_terms']['late_fee'] = data.get('late_fee', '')
-    data['financial_terms']['lease_start'] = str(tenant.lease_start_date) if tenant.lease_start_date else ''
-    data['financial_terms']['lease_expiry'] = str(tenant.lease_expiry_date) if tenant.lease_expiry_date else ''
-    data['financial_terms']['duration'] = data.get('duration', '')
+    if 'tenancy_terms' not in data or not isinstance(data.get('tenancy_terms'), dict):
+        data['tenancy_terms'] = {}
+    if tenant.annual_rent:
+        data['tenancy_terms']['annual_rent_amount'] = float(tenant.annual_rent)
+    data['tenancy_terms']['commencement_date'] = _fmt_date(tenant.lease_start_date)
+    data['tenancy_terms']['expiry_date'] = _fmt_date(tenant.lease_expiry_date)
 
-    data.setdefault('obligations', {})
-    data['obligations']['landlord'] = data.get('obligations_landlord', '')
-    data['obligations']['tenant'] = data.get('obligations_tenant', '')
-
-    data.setdefault('termination', {})
-    data['termination']['notice_period'] = data.get('notice_period', '')
-    data['termination']['early_termination_fee'] = data.get('early_termination_fee', '')
-    data['termination']['conditions'] = data.get('termination_conditions', '')
-
-    data['additional_clauses'] = data.get('additional_clauses', '')
+    data['tenant_name'] = tenant.name
 
     document = TenancyDocument.objects.create(
         tenant=tenant,

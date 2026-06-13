@@ -195,54 +195,84 @@ class TenancyDocument(models.Model):
         return f"{self.tenant.name} - {self.document_type}"
 
 
+TENANTS_COVENANTS_DEFAULT = """<ol>
+<li>Pay the reserved rent at the time and in the manner stated.</li>
+<li>Pay all government rates (excluding property rate), duties, electricity bills, and levies; provide receipts when required.</li>
+<li>Keep the interior of the demised premises, fittings, and fixtures in good and tenantable condition.</li>
+<li>Allow the landlord or authorized agents to enter the apartment at reasonable times for inspection or repairs.</li>
+<li>Not to assign, sublet, or part with possession without the landlord's prior written consent.</li>
+<li>Use the premises for residential purposes only.</li>
+<li>Not to cause nuisance or damage or inconvenience to other tenants or occupiers.</li>
+<li>Not to use a generator set in any location that may cause nuisance, damage, or environmental hazard.</li>
+<li>Not to alter or tamper with the structure, fittings, or fixtures without prior written consent of the landlord.</li>
+<li>Bear the cost of any consented alterations and improvements.</li>
+<li>Alterations and improvements shall not be removed at expiration or termination of tenancy.</li>
+<li>Cooperate with other occupants in general cleaning and maintenance of the estate, and pay yearly for property maintenance and sanitation.</li>
+<li>Bear costs of dislodging septic tank/soak-away pit, washing water tank, and fixing external fittings.</li>
+<li>Pay yearly external security fees of the estate.</li>
+<li>Repair, restore, or replace any facilities damaged by the tenant, servants, or agents.</li>
+<li>Provide and maintain at least one 2-to-7 pounds dry powder fire extinguisher throughout occupancy.</li>
+<li>Not to use the premises for any illegal businesses (e.g., petrol storage, drugs) or immoral businesses or harbouring criminals.</li>
+<li>At expiration or termination, repaint the interior, restore premises to good tenantable condition, and yield vacant possession to the landlord.</li>
+</ol>"""
+
+LANDLORDS_COVENANTS_DEFAULT = """<ol>
+<li>Ensure the tenant has quiet and peaceful enjoyment of the premises during the tenancy term without interruption, provided the tenant observes their covenants.</li>
+<li>Keep and maintain the exterior of the demised premises structurally sound and in good tenantable condition.</li>
+<li>On written request before expiration and with no existing breach, may grant renewal subject to mutually agreed terms.</li>
+</ol>"""
+
 DEFAULT_TEMPLATE_DATA = {
-    'landlord_name': '',
-    'landlord_address': '',
-    'landlord_phone': '',
-    'security_deposit': "One month's rent",
-    'payment_due_date': 'On or before the 28th day of each month',
-    'late_fee': '₦10,000',
-    'duration': '1 year',
-    'obligations_landlord': (
-        '<p><b>Landlord Obligations</b></p>'
-        '<ul>'
-        '<li>To keep the structure and exterior of the premises in good repair.</li>'
-        '<li>To maintain all electrical, plumbing, and mechanical systems in working order.</li>'
-        '<li>To ensure the property is habitable and meets all health and safety standards.</li>'
-        '<li>To respect the tenant\'s right to quiet enjoyment of the premises.</li>'
-        '<li>To carry out necessary repairs within a reasonable timeframe upon notification.</li>'
-        '</ul>'
-    ),
-    'obligations_tenant': (
-        '<p><b>Tenant Obligations</b></p>'
-        '<ul>'
-        '<li>To pay rent and all utility bills promptly and in full on the agreed date.</li>'
-        '<li>To keep the premises clean, tidy, and in good condition.</li>'
-        '<li>To promptly notify the landlord of any disrepair or damage.</li>'
-        '<li>Not to sublet, assign, or part with possession of the premises without written consent.</li>'
-        '<li>To permit the landlord or agent reasonable access for inspection and repairs.</li>'
-        '<li>To comply with all applicable laws, regulations, and community guidelines.</li>'
-        '</ul>'
-    ),
-    'notice_period': '3 months',
-    'early_termination_fee': '₦50,000',
-    'termination_conditions': (
-        '<p><b>Termination Conditions</b></p>'
-        '<ul>'
-        '<li>Either party may terminate this agreement by giving the notice period in writing.</li>'
-        '<li>The landlord may terminate immediately if the tenant breaches any material term.</li>'
-        '<li>The tenant may terminate early by paying the early termination fee.</li>'
-        '<li>Upon termination, the tenant must vacate and return possession of the premises.</li>'
-        '</ul>'
-    ),
-    'additional_clauses': (
-        '<p><b>Additional Clauses</b></p>'
-        '<ul>'
-        '<li><b>Governing Law:</b> This agreement shall be governed by and construed under the laws of the Federal Republic of Nigeria.</li>'
-        '<li><b>Dispute Resolution:</b> Any disputes arising shall first be referred to mediation, and failing resolution, to a court of competent jurisdiction.</li>'
-        '<li><b>Entire Agreement:</b> This document constitutes the entire agreement between the parties.</li>'
-        '</ul>'
-    ),
+    'agent': {
+        'name': '',
+        'description': 'Estate Surveyors, Managers and Valuers',
+        'address': '',
+        'mobile': '',
+        'email': '',
+    },
+    'landlord': {
+        'name': '',
+        'address': '',
+        'legal_note': 'Includes Successors in Title, Executors and Assigns',
+    },
+    'tenants_legal_note': 'Includes Successors in Title, Executors and Assigns',
+    'property': {
+        'description': '',
+        'address': '',
+        'referred_to_as': 'The Demised Premises',
+        'ownership_note': 'Bona fide property of the landlord',
+    },
+    'tenancy_terms': {
+        'type': 'Yearly Tenancy',
+        'currency': 'NGN',
+        'payment': 'Payable in advance',
+        'due_by': 'Not later than thirty (30) days after commencement of each rental year',
+        'duration_years': 1,
+        'caution_fee': {
+            'amount': '',
+            'currency': 'NGN',
+            'type': 'Refundable',
+            'deducted_for': 'Cost of anything damaged or repaired in the demised premises by the tenant',
+            'refunded_if': 'Tenant confirmed by landlord to have not damaged anything in the premises',
+            'top_up': 'Where caution fee is insufficient, tenant shall complete the balance',
+        },
+    },
+    'tenants_covenants': TENANTS_COVENANTS_DEFAULT,
+    'landlords_covenants': LANDLORDS_COVENANTS_DEFAULT,
+    'special_provisions': {
+        'notice_to_quit_months': 3,
+        'termination_notice_months': 3,
+        'holding_over_days': 7,
+        'communication_methods': 'Personal service, Service at party\'s apartment, Registered post, Courier Service',
+        'renewal_request_months': 3,
+        'rent_review_notice_months': 2,
+        'rent_review_reply_weeks': 2,
+        'extra_clauses': '',
+    },
+    'execution': {
+        'landlord_label': 'Signed by the within-named LANDLORD',
+        'tenant_label': 'Signed by the within-named TENANT',
+    },
 }
 
 
