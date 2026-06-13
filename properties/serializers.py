@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice
+from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice, TenancyAgreementTemplate
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -368,6 +368,20 @@ class DashboardPaymentSerializer(serializers.Serializer):
     date = serializers.DateField()
     period_start = serializers.DateField()
     period_end = serializers.DateField()
+
+
+class TenancyAgreementTemplateSerializer(serializers.ModelSerializer):
+    property_name = serializers.SerializerMethodField()
+    property_id = serializers.IntegerField(write_only=True)
+
+    class Meta:
+        model = TenancyAgreementTemplate
+        fields = ['id', 'property', 'property_id', 'property_name', 'title', 'logo_url',
+                  'template_data', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'property', 'created_at', 'updated_at']
+
+    def get_property_name(self, obj):
+        return obj.property.name
 
 
 class DashboardStatsSerializer(serializers.Serializer):

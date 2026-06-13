@@ -10,7 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
@@ -18,6 +18,7 @@ from .serializers import (
     MaintenanceRequestSerializer, MaintenanceRequestListSerializer,
     RegisterSerializer, UserSerializer, UserProfileSerializer,
     TenancyDocumentSerializer, TenancyDocumentDetailSerializer,
+    TenancyAgreementTemplateSerializer,
     ReminderSerializer, QuitNoticeSerializer,
     PublicPropertyListSerializer, PublicPropertyDetailSerializer,
     TenantSelfSerializer, TenantProfileUpdateSerializer,
@@ -428,6 +429,24 @@ class PaymentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class AgreementTemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = TenancyAgreementTemplateSerializer
+
+    def get_queryset(self):
+        return TenancyAgreementTemplate.objects.filter(property__owner=self.request.user)
+
+    def perform_create(self, serializer):
+        property_id = serializer.validated_data.get('property_id')
+        try:
+            prop = Property.objects.get(id=property_id, owner=self.request.user)
+        except Property.DoesNotExist:
+            raise serializers.ValidationError({'property_id': 'Property not found or not owned by you.'})
+        template_data = serializer.validated_data.get('template_data', {})
+        merged = dict(DEFAULT_TEMPLATE_DATA)
+        merged.update(template_data)
+        serializer.save(property=prop, template_data=merged)
+
+
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description', 'status', 'priority', 'reported_by']
@@ -553,11 +572,18 @@ def tenant_sign_document(request, doc_id):
 
     signature_name = request.data.get('signature_name', tenant.name)
     signed_date = date.today()
+    logo_url = ''
+    try:
+        template = TenancyAgreementTemplate.objects.get(property=document.tenant.unit.property)
+        logo_url = template.logo_url
+    except TenancyAgreementTemplate.DoesNotExist:
+        pass
 
     pdf_bytes = generate_tenancy_agreement(
         document.document_data,
         signature_name=signature_name,
         signed_date=signed_date,
+        logo_url=logo_url,
     )
 
     filename = f"tenancy_agreement_{tenant.id}_{signed_date.isoformat()}.pdf"
@@ -609,6 +635,67 @@ def tenant_document_detail(request, doc_id):
         return Response({'error': 'Not a tenant user'}, status=403)
     tenant = request.user.tenant_profile
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    serializer = TenancyDocumentDetailSerializer(document)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_agreement(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    prop = tenant.unit.property
+
+    existing = TenancyDocument.objects.filter(tenant=tenant, document_type='tenancy_agreement').exclude(status='draft').first()
+    if existing:
+        serializer = TenancyDocumentDetailSerializer(existing)
+        return Response(serializer.data)
+
+    try:
+        template = TenancyAgreementTemplate.objects.get(property=prop)
+    except TenancyAgreementTemplate.DoesNotExist:
+        return Response({'error': 'No agreement template set up for your property.'}, status=404)
+
+    data = dict(template.template_data)
+    data.setdefault('parties', {})
+    data['parties']['landlord_name'] = data.get('landlord_name', prop.owner.get_full_name() or prop.owner.username)
+    data['parties']['tenant_name'] = tenant.name
+    data['parties']['landlord_address'] = data.get('landlord_address', '')
+    data['parties']['landlord_phone'] = data.get('landlord_phone', '')
+
+    data.setdefault('property', {})
+    data['property']['address'] = prop.address
+    data['property']['unit_number'] = tenant.unit.unit_number
+
+    data.setdefault('financial_terms', {})
+    data['financial_terms']['annual_rent'] = str(tenant.annual_rent) if tenant.annual_rent else ''
+    data['financial_terms']['security_deposit'] = data.get('security_deposit', '')
+    data['financial_terms']['payment_due_date'] = data.get('payment_due_date', '')
+    data['financial_terms']['late_fee'] = data.get('late_fee', '')
+    data['financial_terms']['lease_start'] = str(tenant.lease_start_date) if tenant.lease_start_date else ''
+    data['financial_terms']['lease_expiry'] = str(tenant.lease_expiry_date) if tenant.lease_expiry_date else ''
+    data['financial_terms']['duration'] = data.get('duration', '')
+
+    data.setdefault('obligations', {})
+    data['obligations']['landlord'] = data.get('obligations_landlord', '')
+    data['obligations']['tenant'] = data.get('obligations_tenant', '')
+
+    data.setdefault('termination', {})
+    data['termination']['notice_period'] = data.get('notice_period', '')
+    data['termination']['early_termination_fee'] = data.get('early_termination_fee', '')
+    data['termination']['conditions'] = data.get('termination_conditions', '')
+
+    data['additional_clauses'] = data.get('additional_clauses', '')
+
+    document = TenancyDocument.objects.create(
+        tenant=tenant,
+        document_type='tenancy_agreement',
+        status='sent',
+        document_data=data,
+        sent_at=datetime.now(),
+    )
+
     serializer = TenancyDocumentDetailSerializer(document)
     return Response(serializer.data)
 

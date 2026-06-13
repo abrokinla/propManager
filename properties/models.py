@@ -195,6 +195,69 @@ class TenancyDocument(models.Model):
         return f"{self.tenant.name} - {self.document_type}"
 
 
+DEFAULT_TEMPLATE_DATA = {
+    'landlord_name': '',
+    'landlord_address': '',
+    'landlord_phone': '',
+    'security_deposit': "One month's rent",
+    'payment_due_date': 'On or before the 28th day of each month',
+    'late_fee': '₦10,000',
+    'duration': '1 year',
+    'obligations_landlord': (
+        '<p><b>Landlord Obligations</b></p>'
+        '<ul>'
+        '<li>To keep the structure and exterior of the premises in good repair.</li>'
+        '<li>To maintain all electrical, plumbing, and mechanical systems in working order.</li>'
+        '<li>To ensure the property is habitable and meets all health and safety standards.</li>'
+        '<li>To respect the tenant\'s right to quiet enjoyment of the premises.</li>'
+        '<li>To carry out necessary repairs within a reasonable timeframe upon notification.</li>'
+        '</ul>'
+    ),
+    'obligations_tenant': (
+        '<p><b>Tenant Obligations</b></p>'
+        '<ul>'
+        '<li>To pay rent and all utility bills promptly and in full on the agreed date.</li>'
+        '<li>To keep the premises clean, tidy, and in good condition.</li>'
+        '<li>To promptly notify the landlord of any disrepair or damage.</li>'
+        '<li>Not to sublet, assign, or part with possession of the premises without written consent.</li>'
+        '<li>To permit the landlord or agent reasonable access for inspection and repairs.</li>'
+        '<li>To comply with all applicable laws, regulations, and community guidelines.</li>'
+        '</ul>'
+    ),
+    'notice_period': '3 months',
+    'early_termination_fee': '₦50,000',
+    'termination_conditions': (
+        '<p><b>Termination Conditions</b></p>'
+        '<ul>'
+        '<li>Either party may terminate this agreement by giving the notice period in writing.</li>'
+        '<li>The landlord may terminate immediately if the tenant breaches any material term.</li>'
+        '<li>The tenant may terminate early by paying the early termination fee.</li>'
+        '<li>Upon termination, the tenant must vacate and return possession of the premises.</li>'
+        '</ul>'
+    ),
+    'additional_clauses': (
+        '<p><b>Additional Clauses</b></p>'
+        '<ul>'
+        '<li><b>Governing Law:</b> This agreement shall be governed by and construed under the laws of the Federal Republic of Nigeria.</li>'
+        '<li><b>Dispute Resolution:</b> Any disputes arising shall first be referred to mediation, and failing resolution, to a court of competent jurisdiction.</li>'
+        '<li><b>Entire Agreement:</b> This document constitutes the entire agreement between the parties.</li>'
+        '</ul>'
+    ),
+}
+
+
+class TenancyAgreementTemplate(models.Model):
+    property = models.OneToOneField(Property, on_delete=models.CASCADE, related_name='agreement_template')
+    title = models.CharField(max_length=200, default='Tenancy Agreement')
+    logo_url = models.URLField(max_length=500, blank=True, default='')
+    template_data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Template - {self.property.name}"
+
+
 class Reminder(models.Model):
     CHANNEL_CHOICES = [
         ('email', 'Email'),

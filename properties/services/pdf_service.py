@@ -1,17 +1,18 @@
 import io
 import logging
 from datetime import date
+from urllib.request import urlopen
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib.colors import HexColor
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 logger = logging.getLogger(__name__)
 
 
-def generate_tenancy_agreement(document_data: dict, signature_name: str = None, signed_date: date = None) -> bytes:
+def generate_tenancy_agreement(document_data: dict, signature_name: str = None, signed_date: date = None, logo_url: str = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -24,6 +25,17 @@ def generate_tenancy_agreement(document_data: dict, signature_name: str = None, 
     signature_style = ParagraphStyle('Signature', parent=normal, fontSize=12, leading=18, spaceAfter=4, textColor=HexColor('#1a1a2e'))
 
     elements = []
+
+    if logo_url:
+        try:
+            img_data = urlopen(logo_url, timeout=10).read()
+            img = Image(io.BytesIO(img_data), width=4*cm, height=4*cm)
+            img.hAlign = 'CENTER'
+            elements.append(img)
+            elements.append(Spacer(1, 8))
+        except Exception:
+            logger.warning(f"Failed to load logo: {logo_url}")
+
     elements.append(Paragraph("TENANCY AGREEMENT", title_style))
     elements.append(HRFlowable(width="100%", thickness=1, color=HexColor('#0f3460'), spaceAfter=16))
 
