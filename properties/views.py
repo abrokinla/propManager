@@ -680,11 +680,16 @@ def tenant_agreement(request):
     if not data['landlord'].get('name'):
         data['landlord']['name'] = prop.owner.get_full_name() or prop.owner.username
 
-    if 'property' not in data or not isinstance(data.get('property'), dict):
-        data['property'] = {}
-    if not data['property'].get('address'):
-        data['property']['address'] = prop.address
-    data['property']['unit_number'] = tenant.unit.unit_number
+    template_property = template.template_data.get('property', {}) or {}
+    data['property'] = {
+        'name': prop.name,
+        'description': prop.description,
+        'address': prop.address,
+        'property_type': prop.get_property_type_display(),
+        'unit_number': tenant.unit.unit_number,
+        'referred_to_as': template_property.get('referred_to_as', 'The Demised Premises'),
+        'ownership_note': template_property.get('ownership_note', 'Bona fide property of the landlord'),
+    }
 
     if 'tenancy_terms' not in data or not isinstance(data.get('tenancy_terms'), dict):
         data['tenancy_terms'] = {}

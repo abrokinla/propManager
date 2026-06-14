@@ -237,8 +237,6 @@ DEFAULT_TEMPLATE_DATA = {
     },
     'tenants_legal_note': 'Includes Successors in Title, Executors and Assigns',
     'property': {
-        'description': '',
-        'address': '',
         'referred_to_as': 'The Demised Premises',
         'ownership_note': 'Bona fide property of the landlord',
     },
