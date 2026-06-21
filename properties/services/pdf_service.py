@@ -258,13 +258,35 @@ def generate_tenancy_agreement(document_data: dict, signature_name: str = None, 
     elements.append(Paragraph("EXECUTION", heading_style))
 
     if signature_name and signed_date:
-        # Signed version
-        elements.append(Spacer(1, 10))
-        elements.append(Paragraph(f"<b>Signed by the Tenant:</b>", normal))
-        elements.append(Paragraph(f"<b>{signature_name}</b>", signature_style))
-        elements.append(Paragraph(f"<b>Date:</b>  {_fmt_date(signed_date)}", signature_style))
-        elements.append(Spacer(1, 4))
-        elements.append(Paragraph("This document has been electronically signed by the tenant.", legal_note))
+        # Signed version — both sides pre-filled
+        elements.append(Spacer(1, 8))
+        landlord_label = exec_data.get('landlord_label', 'Signed by the within-named LANDLORD')
+        tenant_label = exec_data.get('tenant_label', 'Signed by the within-named TENANT')
+        landlord_name = (document_data.get('landlord', {}) or {}).get('name', '')
+        tenant_witness = document_data.get('witness_tenant', {}) or {}
+        sig_table_data = [
+            ['', ''],
+            [Paragraph(f"<b>{landlord_label}</b>", normal), Paragraph(f"<b>{tenant_label}</b>", normal)],
+            ['', ''],
+            [Paragraph(f"<b>Name:</b>  {landlord_name}", signature_style), Paragraph(f"<b>Name:</b>  {signature_name}", signature_style)],
+            ['', ''],
+            [Paragraph(f"<b>Signature:</b>  {landlord_name}", signature_style), Paragraph(f"<b>Signature:</b>  {signature_name} (electronic)", signature_style)],
+            ['', ''],
+            [Paragraph(f"<b>Date:</b>  {_fmt_date(signed_date)}", signature_style), Paragraph(f"<b>Date:</b>  {_fmt_date(signed_date)}", signature_style)],
+            ['', ''],
+            ['<b>Witness:</b>', '<b>Witness:</b>'],
+            [Paragraph(f"<b>Name:</b>  {exec_data.get('witness_landlord_name', '')}", signature_style), Paragraph(f"<b>Name:</b>  {tenant_witness.get('witness_name', '')}", signature_style)],
+            [Paragraph(f"<b>Address:</b>  {exec_data.get('witness_landlord_address', '')}", signature_style), Paragraph(f"<b>Address:</b>  {tenant_witness.get('witness_address', '')}", signature_style)],
+            [Paragraph(f"<b>Occupation:</b>  ________________________", signature_style), Paragraph(f"<b>Occupation:</b>  {tenant_witness.get('witness_occupation', '')}", signature_style)],
+        ]
+        st = Table(sig_table_data, colWidths=[8*cm, 8*cm])
+        st.setStyle(TableStyle([
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(st)
     else:
         # Unsigned version — show signature blocks
         elements.append(Spacer(1, 8))

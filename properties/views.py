@@ -581,6 +581,11 @@ def tenant_sign_document(request, doc_id):
 
     signature_name = request.data.get('signature_name', tenant.name)
     signed_date = date.today()
+    witness_data = {
+        'witness_name': request.data.get('witness_name', ''),
+        'witness_address': request.data.get('witness_address', ''),
+        'witness_occupation': request.data.get('witness_occupation', ''),
+    }
     logo_url = ''
     try:
         template = TenancyAgreementTemplate.objects.get(property=document.tenant.unit.property)
@@ -588,8 +593,11 @@ def tenant_sign_document(request, doc_id):
     except TenancyAgreementTemplate.DoesNotExist:
         pass
 
+    doc_data = dict(document.document_data)
+    doc_data['witness_tenant'] = witness_data
+
     pdf_bytes = generate_tenancy_agreement(
-        document.document_data,
+        doc_data,
         signature_name=signature_name,
         signed_date=signed_date,
         logo_url=logo_url,

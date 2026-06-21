@@ -270,6 +270,8 @@ DEFAULT_TEMPLATE_DATA = {
     'execution': {
         'landlord_label': 'Signed by the within-named LANDLORD',
         'tenant_label': 'Signed by the within-named TENANT',
+        'witness_landlord_name': '',
+        'witness_landlord_address': '',
     },
 }
 
