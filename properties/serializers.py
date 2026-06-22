@@ -188,12 +188,13 @@ class TenantSerializer(serializers.ModelSerializer):
 
 
 class TenantListSerializer(serializers.ModelSerializer):
+    unit = UnitListSerializer(read_only=True)
     unit_number = serializers.SerializerMethodField()
     property_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenant
-        fields = ['id', 'name', 'email', 'phone', 'unit_number', 'property_name', 'annual_rent',
+        fields = ['id', 'unit', 'name', 'email', 'phone', 'unit_number', 'property_name', 'annual_rent',
                   'tenancy_status', 'lease_expiry_date', 'is_active', 'profile_completed']
 
     def get_unit_number(self, obj):
