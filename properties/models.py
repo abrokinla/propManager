@@ -177,14 +177,21 @@ class TenancyDocument(models.Model):
         ('viewed', 'Viewed'),
         ('signed', 'Signed'),
         ('completed', 'Completed'),
+        ('pending_verification', 'Pending Verification'),
+    ]
+    AGREEMENT_MODE_CHOICES = [
+        ('template', 'Template'),
+        ('uploaded_pdf', 'Uploaded PDF'),
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='documents')
     document_type = models.CharField(max_length=50, default='tenancy_agreement')
     status = models.CharField(max_length=20, choices=DOCUMENT_STATUS_CHOICES, default='draft')
+    mode = models.CharField(max_length=20, choices=AGREEMENT_MODE_CHOICES, default='template')
     document_data = models.JSONField(default=dict)
     file_url = models.URLField(null=True, blank=True)
     signed_file_url = models.URLField(null=True, blank=True)
+    verification_note = models.TextField(null=True, blank=True)
     access_token = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     sent_at = models.DateTimeField(null=True, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
@@ -277,9 +284,16 @@ DEFAULT_TEMPLATE_DATA = {
 
 
 class TenancyAgreementTemplate(models.Model):
+    AGREEMENT_MODE_CHOICES = [
+        ('template', 'Use Agreement Template'),
+        ('uploaded_pdf', 'Upload Scanned PDF'),
+    ]
+
     property = models.OneToOneField(Property, on_delete=models.CASCADE, related_name='agreement_template')
     title = models.CharField(max_length=200, default='Tenancy Agreement')
     logo_url = models.URLField(max_length=500, blank=True, default='')
+    mode = models.CharField(max_length=20, choices=AGREEMENT_MODE_CHOICES, default='template')
+    uploaded_pdf_url = models.URLField(max_length=500, blank=True, default='')
     template_data = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

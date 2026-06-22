@@ -285,8 +285,8 @@ class MaintenanceRequestListSerializer(serializers.ModelSerializer):
 class TenancyDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenancyDocument
-        fields = ['id', 'tenant', 'document_type', 'status', 'document_data', 'file_url',
-                  'signed_file_url', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
+        fields = ['id', 'tenant', 'document_type', 'status', 'mode', 'document_data', 'file_url',
+                  'signed_file_url', 'verification_note', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
         read_only_fields = ['id', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
 
 
@@ -294,13 +294,24 @@ class TenancyDocumentDetailSerializer(serializers.ModelSerializer):
     tenant_name = serializers.SerializerMethodField()
     property_name = serializers.SerializerMethodField()
     unit_number = serializers.SerializerMethodField()
+    uploaded_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = TenancyDocument
         fields = ['id', 'tenant', 'tenant_name', 'property_name', 'unit_number',
-                  'document_type', 'status', 'document_data', 'file_url',
-                  'signed_file_url', 'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
+                  'document_type', 'status', 'mode', 'document_data', 'file_url',
+                  'signed_file_url', 'verification_note', 'uploaded_pdf_url',
+                  'access_token', 'sent_at', 'signed_at', 'created_at', 'updated_at']
         read_only_fields = fields
+
+    def get_uploaded_pdf_url(self, obj):
+        try:
+            template = TenancyAgreementTemplate.objects.get(property=obj.tenant.unit.property)
+            if template.mode == 'uploaded_pdf':
+                return template.uploaded_pdf_url
+        except TenancyAgreementTemplate.DoesNotExist:
+            pass
+        return obj.file_url or ''
 
     def get_tenant_name(self, obj):
         return obj.tenant.name
@@ -377,7 +388,7 @@ class TenancyAgreementTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenancyAgreementTemplate
         fields = ['id', 'property', 'property_id', 'property_name', 'title', 'logo_url',
-                  'template_data', 'created_at', 'updated_at']
+                  'mode', 'uploaded_pdf_url', 'template_data', 'created_at', 'updated_at']
         read_only_fields = ['id', 'property', 'created_at', 'updated_at']
 
     def get_property_name(self, obj):

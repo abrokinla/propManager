@@ -352,6 +352,56 @@ class TenantViewSet(viewsets.ModelViewSet):
         serializer = TenancyDocumentSerializer(document)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'], url_path='documents/(?P<doc_id>[^/.]+)/verify')
+    def verify_signed(self, request, pk=None, doc_id=None):
+        tenant = self.get_object()
+        document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+        if document.status != 'pending_verification':
+            return Response({'error': 'Document is not pending verification'}, status=status.HTTP_400_BAD_REQUEST)
+
+        action = request.data.get('action')
+        if action == 'verify':
+            document.status = 'signed'
+            document.signed_at = datetime.now()
+            document.save(update_fields=['status', 'signed_at'])
+            tenant.tenancy_status = 'document_signed'
+            tenant.save(update_fields=['tenancy_status'])
+            agent = request.user
+            if tenant.email:
+                from .services.email_service import send_email
+                send_email(
+                    to=tenant.email,
+                    subject='Tenancy Agreement Verified',
+                    html_body=(
+                        f'<p>Dear {tenant.name},</p>'
+                        f'<p>Your tenancy agreement for {document.tenant.unit.property.name} - '
+                        f'{document.tenant.unit.unit_number} has been verified as signed.</p>'
+                    ),
+                )
+        elif action == 'reject':
+            reason = request.data.get('reason', '')
+            document.status = 'sent'
+            document.verification_note = reason
+            document.save(update_fields=['status', 'verification_note'])
+            if tenant.email:
+                from .services.email_service import send_email
+                send_email(
+                    to=tenant.email,
+                    subject='Tenancy Agreement Verification Failed',
+                    html_body=(
+                        f'<p>Dear {tenant.name},</p>'
+                        f'<p>Your signed tenancy agreement for {document.tenant.unit.property.name} - '
+                        f'{document.tenant.unit.unit_number} was not accepted.</p>'
+                        f'<p><b>Reason:</b> {reason}</p>'
+                        f'<p>Please re-upload your signed copy.</p>'
+                    ),
+                )
+        else:
+            return Response({'error': 'action must be "verify" or "reject"'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = TenancyDocumentSerializer(document)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'])
     def quit_notice(self, request, pk=None):
         tenant = self.get_object()
@@ -454,6 +504,18 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
         template_data = serializer.validated_data.get('template_data', {})
         merged = deep_merge(DEFAULT_TEMPLATE_DATA, template_data)
         serializer.save(property=prop, template_data=merged)
+
+    @action(detail=True, methods=['post'])
+    def upload_pdf(self, request, pk=None):
+        template = self.get_object()
+        pdf_file = request.FILES.get('file')
+        if not pdf_file:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        file_bytes = pdf_file.read()
+        url = upload_file_bytes(file_bytes, pdf_file.name, pdf_file.content_type, folder='agreement_pdfs')
+        template.uploaded_pdf_url = url
+        template.save(update_fields=['uploaded_pdf_url'])
+        return Response({'uploaded_pdf_url': url})
 
 
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
@@ -571,6 +633,52 @@ def tenant_complete_profile(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def tenant_upload_signed(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    if document.status == 'signed':
+        return Response({'error': 'Document already signed'}, status=400)
+    if document.status == 'pending_verification':
+        return Response({'error': 'Document is already pending verification'}, status=400)
+    if document.mode != 'uploaded_pdf':
+        return Response({'error': 'This agreement uses template mode. Please use the electronic sign option.'}, status=400)
+
+    signed_file = request.FILES.get('signed_file')
+    if not signed_file:
+        return Response({'error': 'signed_file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    file_bytes = signed_file.read()
+    url = upload_file_bytes(file_bytes, signed_file.name, signed_file.content_type, folder='signed_documents')
+
+    document.signed_file_url = url
+    document.status = 'pending_verification'
+    document.save(update_fields=['signed_file_url', 'status'])
+
+    agent = document.tenant.unit.property.owner
+    if agent and agent.email:
+        from .services.email_service import send_email
+        send_email(
+            to=agent.email,
+            subject=f'Signed Agreement Submitted - {tenant.name}',
+            html_body=(
+                f'<p>Dear {agent.get_full_name() or agent.username},</p>'
+                f'<p>{tenant.name} has uploaded a signed copy of the tenancy agreement for '
+                f'{document.tenant.unit.property.name} - {document.tenant.unit.unit_number}.</p>'
+                f'<p>Please verify the document in your dashboard.</p>'
+                f'<p><a href="{url}">View uploaded signed copy</a></p>'
+            ),
+        )
+
+    return Response({
+        'status': 'pending_verification',
+        'signed_file_url': url,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def tenant_sign_document(request, doc_id):
     if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
         return Response({'error': 'Not a tenant user'}, status=403)
@@ -578,6 +686,9 @@ def tenant_sign_document(request, doc_id):
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
     if document.status == 'signed':
         return Response({'error': 'Document already signed'}, status=400)
+
+    if document.mode == 'uploaded_pdf':
+        return Response({'error': 'This agreement uses uploaded PDF mode. Please upload your signed copy instead.'}, status=400)
 
     signature_name = request.data.get('signature_name', tenant.name)
     signed_date = date.today()
@@ -666,6 +777,10 @@ def tenant_agreement(request):
 
     existing = TenancyDocument.objects.filter(tenant=tenant, document_type='tenancy_agreement').exclude(status='draft').first()
     if existing:
+        # Check if verification_note should be cleared (re-upload after rejection)
+        if existing.status == 'sent' and existing.verification_note and request.GET.get('cleared'):
+            existing.verification_note = ''
+            existing.save(update_fields=['verification_note'])
         serializer = TenancyDocumentDetailSerializer(existing)
         return Response(serializer.data)
 
@@ -673,6 +788,18 @@ def tenant_agreement(request):
         template = TenancyAgreementTemplate.objects.get(property=prop)
     except TenancyAgreementTemplate.DoesNotExist:
         return Response({'error': 'No agreement template set up for your property.'}, status=404)
+
+    if template.mode == 'uploaded_pdf':
+        document = TenancyDocument.objects.create(
+            tenant=tenant,
+            document_type='tenancy_agreement',
+            status='sent',
+            mode='uploaded_pdf',
+            file_url=template.uploaded_pdf_url,
+            sent_at=datetime.now(),
+        )
+        serializer = TenancyDocumentDetailSerializer(document)
+        return Response(serializer.data)
 
     def _fmt_date(d):
         if not d:
@@ -718,6 +845,22 @@ def tenant_agreement(request):
 
     serializer = TenancyDocumentDetailSerializer(document)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def pending_verifications(request):
+    docs = TenancyDocument.objects.filter(
+        status='pending_verification',
+        tenant__unit__property__owner=request.user,
+    ).select_related('tenant', 'tenant__unit', 'tenant__unit__property')
+    return Response([{
+        'tenant_id': d.tenant_id,
+        'tenant_name': d.tenant.name,
+        'document_id': d.id,
+        'property_id': d.tenant.unit.property_id,
+        'signed_file_url': d.signed_file_url,
+    } for d in docs])
 
 
 @api_view(['GET', 'POST'])
