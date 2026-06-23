@@ -268,7 +268,7 @@ class UnitViewSet(viewsets.ModelViewSet):
                 type='rent_change',
                 title=f'Rent Updated — {unit.property.name}',
                 message=f'Your rent for {unit.property.name} - {unit.unit_number} has changed from ₦{old_price:,.0f} to ₦{unit.price_rent:,.0f} per {unit.get_rent_cycle_display()}.',
-                link='/tenant/dashboard',
+                link='/dashboard',
                 send_email_flag=True,
             )
 
@@ -396,7 +396,7 @@ class TenantViewSet(viewsets.ModelViewSet):
                 type='document_verified',
                 title='Agreement Verified',
                 message=f'Your tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number} has been verified.',
-                link='/tenant/tenancy-agreement',
+                link='/tenancy-agreement',
                 send_email_flag=True,
                 email_subject='Tenancy Agreement Verified',
                 email_body=(
@@ -415,7 +415,7 @@ class TenantViewSet(viewsets.ModelViewSet):
                 type='document_rejected',
                 title='Agreement Verification Failed',
                 message=f'Your signed tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number} was not accepted. Reason: {reason}',
-                link='/tenant/tenancy-agreement',
+                link='/tenancy-agreement',
                 send_email_flag=True,
                 email_subject='Tenancy Agreement Verification Failed',
                 email_body=(
@@ -443,7 +443,7 @@ class TenantViewSet(viewsets.ModelViewSet):
             type='quit_notice',
             title='Quit Notice Issued',
             message=f'A quit notice has been issued for {tenant.unit.property.name} - {tenant.unit.unit_number}. Reason: {reason}',
-            link='/tenant/dashboard',
+            link='/dashboard',
             send_email_flag=True,
         )
 
@@ -571,7 +571,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             type='payment_approved',
             title='Payment Approved',
             message=f'Your payment of ₦{float(payment.amount):,.0f} for {tenant.unit.property.name} has been approved.',
-            link='/tenant/dashboard',
+            link='/dashboard',
             send_email_flag=True,
         )
 
@@ -595,7 +595,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             type='payment_rejected',
             title='Payment Rejected',
             message=f'Your payment of ₦{float(payment.amount):,.0f} for {payment.tenant.unit.property.name} has been rejected. Reason: {reason}',
-            link='/tenant/dashboard',
+            link='/dashboard',
             send_email_flag=True,
         )
 
@@ -690,7 +690,7 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
                     type='maintenance_request',
                     title=f'Maintenance Request — {req.unit.unit_number}',
                     message=f'A maintenance request has been logged: {req.title}. Status: {req.status}.',
-                    link='/tenant/dashboard',
+                    link='/dashboard',
                     send_email_flag=True,
                 )
         except Tenant.DoesNotExist:
