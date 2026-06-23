@@ -399,6 +399,8 @@ class TenancyAgreementTemplateSerializer(serializers.ModelSerializer):
 
 
 class DashboardStatsSerializer(serializers.Serializer):
+    public_slug = serializers.CharField()
+    company_name = serializers.CharField()
     total_properties = serializers.IntegerField()
     total_units = serializers.IntegerField()
     occupied_units = serializers.IntegerField()

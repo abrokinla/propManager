@@ -11,7 +11,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification, UserProfile
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
@@ -149,7 +149,10 @@ def dashboard_stats(request):
         unit__property__owner=request.user
     ).exclude(status='Completed').count()
 
+    profile = request.user.profile
     return Response({
+        'public_slug': profile.public_slug,
+        'company_name': profile.company_name,
         'total_properties': total_properties,
         'total_units': total_units,
         'occupied_units': active_tenants,
@@ -185,6 +188,24 @@ def public_properties_list(request):
     ).filter(active_count__lt=F('total_units')).distinct()
     serializer = PublicPropertyListSerializer(props, many=True)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_agent_properties(request, slug):
+    profile = get_object_or_404(UserProfile, public_slug=slug)
+    props = Property.objects.filter(
+        owner=profile.user, is_published=True
+    ).annotate(
+        active_count=Count('units__tenant', filter=Q(units__tenant__is_active=True))
+    ).filter(active_count__lt=F('total_units')).distinct()
+    serializer = PublicPropertyListSerializer(props, many=True)
+    return Response({
+        'agent': {
+            'company_name': profile.company_name or profile.user.get_full_name() or profile.user.username,
+        },
+        'properties': serializer.data,
+    })
 
 
 @api_view(['GET'])
