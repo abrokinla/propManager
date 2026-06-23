@@ -275,7 +275,7 @@ class MaintenanceRequestListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MaintenanceRequest
-        fields = ['id', 'title', 'priority', 'status', 'unit_number', 'property_name', 'reported_by', 'created_at']
+        fields = ['id', 'title', 'description', 'priority', 'status', 'unit_number', 'property_name', 'reported_by', 'created_at']
 
     def get_unit_number(self, obj):
         return obj.unit.unit_number

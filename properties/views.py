@@ -689,9 +689,16 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
                     recipient=tenant.user,
                     type='maintenance_request',
                     title=f'Maintenance Request — {req.unit.unit_number}',
-                    message=f'A maintenance request has been logged: {req.title}. Status: {req.status}.',
+                    message=f'A maintenance request has been logged: {req.title} — {req.description}. Status: {req.status}.',
                     link='/dashboard',
                     send_email_flag=True,
+                    email_body=(
+                        f'<p>A maintenance request has been logged for <strong>{req.unit.unit_number}</strong>.</p>'
+                        f'<p><strong>Title:</strong> {req.title}<br>'
+                        f'<strong>Priority:</strong> {req.priority}<br>'
+                        f'<strong>Status:</strong> {req.status}<br>'
+                        f'<strong>Description:</strong><br>{req.description}</p>'
+                    ),
                 )
         except Tenant.DoesNotExist:
             pass
@@ -1161,9 +1168,16 @@ def tenant_maintenance(request):
         recipient=agent,
         type='maintenance_request',
         title=f'Maintenance Request — {tenant.unit.unit_number}',
-        message=f'{tenant.name} reported: {title}.',
+        message=f'{tenant.name} reported: {title} — {description}',
         link='/maintenance',
         send_email_flag=True,
+        email_body=(
+            f'<p><strong>{tenant.name}</strong> reported a maintenance issue.</p>'
+            f'<p><strong>Unit:</strong> {tenant.unit.unit_number}<br>'
+            f'<strong>Title:</strong> {title}<br>'
+            f'<strong>Priority:</strong> {priority}<br>'
+            f'<strong>Description:</strong><br>{description}</p>'
+        ),
     )
 
     serializer = MaintenanceRequestListSerializer(req)
