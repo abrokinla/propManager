@@ -633,6 +633,8 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    pagination_class = None
+    lookup_value_regex = '[0-9]+'
 
     def get_queryset(self):
         return Notification.objects.filter(recipient=self.request.user)
