@@ -69,7 +69,7 @@ class PublicUnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Unit
         fields = ['id', 'unit_number', 'bedrooms', 'bathrooms', 'toilets',
-                  'size_sqft', 'price_rent', 'price_sale']
+                  'size_sqft', 'price_rent', 'price_sale', 'rent_cycle']
 
 
 class PublicPropertyListSerializer(serializers.ModelSerializer):
@@ -127,7 +127,7 @@ class UnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Unit
         fields = ['id', 'property', 'property_id', 'unit_number', 'bedrooms', 'toilets', 'bathrooms',
-                  'size_sqft', 'price_sale', 'price_rent', 'status', 'tenant_name', 'created_at', 'updated_at']
+                  'size_sqft', 'price_sale', 'price_rent', 'rent_cycle', 'status', 'tenant_name', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_tenant_name(self, obj):
@@ -142,7 +142,7 @@ class UnitListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Unit
-        fields = ['id', 'property_id', 'property_name', 'unit_number', 'bedrooms', 'bathrooms', 'price_rent', 'status', 'tenant_name']
+        fields = ['id', 'property_id', 'property_name', 'unit_number', 'bedrooms', 'bathrooms', 'price_rent', 'rent_cycle', 'status', 'tenant_name']
 
     def get_property_name(self, obj):
         return obj.property.name
@@ -162,7 +162,7 @@ class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ['id', 'unit', 'unit_id', 'name', 'phone', 'email', 'address', 'annual_rent',
-                  'tenancy_status', 'unit_number', 'property_name',
+                  'rent_cycle', 'tenancy_status', 'unit_number', 'property_name',
                   'passport_photo', 'government_id', 'occupation', 'employer_name', 'employer_address',
                   'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_email', 'next_of_kin_address',
                   'emergency_contact_name', 'emergency_contact_phone',
@@ -170,13 +170,12 @@ class TenantSerializer(serializers.ModelSerializer):
                   'profile_completed',
                   'lease_start_date', 'lease_renewal_date', 'lease_expiry_date', 'move_in_date',
                   'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'lease_start_date',
+                           'lease_renewal_date', 'lease_expiry_date']
         extra_kwargs = {
             'phone': {'required': False, 'allow_blank': True},
             'email': {'required': False, 'allow_blank': True},
             'annual_rent': {'required': False, 'allow_null': True},
-            'lease_start_date': {'required': False, 'allow_null': True},
-            'lease_expiry_date': {'required': False, 'allow_null': True},
             'move_in_date': {'required': False, 'allow_null': True},
         }
 
@@ -195,7 +194,7 @@ class TenantListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ['id', 'unit', 'name', 'email', 'phone', 'unit_number', 'property_name', 'annual_rent',
-                  'tenancy_status', 'lease_expiry_date', 'is_active', 'profile_completed']
+                  'rent_cycle', 'tenancy_status', 'lease_expiry_date', 'is_active', 'profile_completed']
 
     def get_unit_number(self, obj):
         return obj.unit.unit_number
@@ -346,13 +345,13 @@ class TenantSelfSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ['id', 'name', 'phone', 'email', 'address', 'unit_number', 'property_name',
-                  'annual_rent', 'tenancy_status', 'profile_completed',
+                  'annual_rent', 'rent_cycle', 'tenancy_status', 'profile_completed',
                   'passport_photo', 'government_id',
                   'occupation', 'employer_name', 'employer_address',
                   'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_email', 'next_of_kin_address',
                   'emergency_contact_name', 'emergency_contact_phone',
                   'guarantor_name', 'guarantor_phone', 'guarantor_email', 'guarantor_address',
-                  'lease_start_date', 'lease_renewal_date', 'lease_expiry_date',
+                  'lease_start_date', 'lease_renewal_date', 'lease_expiry_date', 'move_in_date',
                   'created_at']
         read_only_fields = ['id', 'name', 'unit_number', 'property_name', 'annual_rent',
                            'tenancy_status', 'profile_completed', 'lease_start_date',
@@ -371,7 +370,8 @@ class TenantProfileUpdateSerializer(serializers.ModelSerializer):
         fields = ['phone', 'address', 'occupation', 'employer_name', 'employer_address',
                   'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_email', 'next_of_kin_address',
                   'emergency_contact_name', 'emergency_contact_phone',
-                  'guarantor_name', 'guarantor_phone', 'guarantor_email', 'guarantor_address']
+                  'guarantor_name', 'guarantor_phone', 'guarantor_email', 'guarantor_address',
+                  'move_in_date']
 
 
 class DashboardPaymentSerializer(serializers.Serializer):

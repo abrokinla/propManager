@@ -62,6 +62,13 @@ class Property(models.Model):
         return self.name
 
 
+RENT_CYCLE_CHOICES = [
+    ('daily', 'Daily'),
+    ('monthly', 'Monthly'),
+    ('yearly', 'Yearly'),
+]
+
+
 class Unit(models.Model):
     STATUS_CHOICES = [
         ('Available', 'Available'),
@@ -79,6 +86,7 @@ class Unit(models.Model):
     size_sqft = models.IntegerField(null=True, blank=True)
     price_sale = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     price_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    rent_cycle = models.CharField(max_length=10, choices=RENT_CYCLE_CHOICES, default='yearly')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -106,6 +114,7 @@ class Tenant(models.Model):
     email = models.EmailField(blank=True, default='')
     address = models.TextField(blank=True, default='')
     annual_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    rent_cycle = models.CharField(max_length=10, choices=RENT_CYCLE_CHOICES, default='yearly')
     tenancy_status = models.CharField(max_length=20, choices=TENANCY_STATUS_CHOICES, default='invited')
     passport_photo = models.URLField(max_length=500, blank=True, default='')
     government_id = models.URLField(max_length=500, blank=True, default='')

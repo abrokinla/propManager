@@ -6,6 +6,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 from django.db.models import Count, F, Sum, Q
 from django.shortcuts import get_object_or_404
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
@@ -464,6 +465,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
+        import calendar
         payment = self.get_object()
         if payment.status != 'pending':
             return Response({'error': f'Payment is already {payment.status}'}, status=400)
@@ -471,6 +473,60 @@ class PaymentViewSet(viewsets.ModelViewSet):
         payment.approved_by = request.user
         payment.approved_at = datetime.now()
         payment.save(update_fields=['status', 'approved_by', 'approved_at'])
+
+        tenant = payment.tenant
+        if tenant.annual_rent and tenant.annual_rent > 0:
+            def add_months(d, n):
+                total = d.year * 12 + d.month - 1 + n
+                y = total // 12
+                m = total % 12 + 1
+                try:
+                    return d.replace(year=y, month=m)
+                except ValueError:
+                    last_day = calendar.monthrange(y, m)[1]
+                    return d.replace(year=y, month=m, day=last_day)
+
+            if not payment.period_end:
+                cycle = tenant.rent_cycle or 'yearly'
+                annual = float(tenant.annual_rent)
+
+                if cycle == 'yearly':
+                    months_per_unit = 12
+                    cost_per_unit = annual
+                elif cycle == 'monthly':
+                    months_per_unit = 1
+                    cost_per_unit = annual / 12
+                else:  # daily
+                    months_per_unit = 1
+                    cost_per_unit = annual / 365
+
+                units_paid = float(payment.amount) / cost_per_unit
+                total_months = max(int(units_paid * months_per_unit), 1)
+                payment.years_covered = max(total_months // 12, 1)
+
+                if not payment.period_start:
+                    payment.period_start = datetime.now().date()
+
+                if tenant.lease_start_date and tenant.lease_expiry_date:
+                    coverage_start = tenant.lease_expiry_date
+                else:
+                    coverage_start = payment.period_start
+
+                payment.period_end = add_months(coverage_start, total_months)
+                payment.save(update_fields=['years_covered', 'period_end', 'period_start'])
+
+                if tenant.lease_start_date and tenant.lease_expiry_date:
+                    tenant.lease_expiry_date = add_months(tenant.lease_expiry_date, total_months)
+                    tenant.lease_renewal_date = tenant.lease_expiry_date
+                else:
+                    tenant.lease_start_date = payment.period_start
+                    tenant.lease_expiry_date = payment.period_end
+                    tenant.lease_renewal_date = payment.period_end
+
+                if tenant.tenancy_status in ('document_signed', 'document_sent'):
+                    tenant.tenancy_status = 'active'
+                tenant.save(update_fields=['lease_start_date', 'lease_expiry_date', 'lease_renewal_date', 'tenancy_status'])
+
         serializer = self.get_serializer(payment)
         return Response(serializer.data)
 
@@ -690,6 +746,9 @@ def tenant_sign_document(request, doc_id):
     if document.mode == 'uploaded_pdf':
         return Response({'error': 'This agreement uses uploaded PDF mode. Please upload your signed copy instead.'}, status=400)
 
+    if not Payment.objects.filter(tenant=tenant, status='approved').exists():
+        return Response({'error': 'You must complete rent payment and have it approved before signing the agreement.'}, status=400)
+
     signature_name = request.data.get('signature_name', tenant.name)
     signed_date = date.today()
     witness_data = {
@@ -765,6 +824,43 @@ def tenant_document_detail(request, doc_id):
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
     serializer = TenancyDocumentDetailSerializer(document)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_download_signed(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    if not document.signed_file_url:
+        return Response({'error': 'No signed file available'}, status=404)
+    import urllib.request
+    resp = urllib.request.urlopen(document.signed_file_url)
+    content = resp.read()
+    content_type = resp.headers.get('Content-Type', 'application/pdf')
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="signed_agreement_{doc_id}.pdf"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_download_unsigned(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
+    if not url:
+        return Response({'error': 'No file available'}, status=404)
+    import urllib.request
+    resp = urllib.request.urlopen(url)
+    content = resp.read()
+    content_type = resp.headers.get('Content-Type', 'application/pdf')
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="agreement_{doc_id}.pdf"'
+    return response
 
 
 @api_view(['GET'])

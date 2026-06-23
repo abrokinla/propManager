@@ -15,6 +15,7 @@ from properties.views import (
     public_properties_list, public_property_detail,
     tenant_me, tenant_complete_profile, tenant_sign_document,
     tenant_upload_signed, tenant_documents, tenant_document_detail,
+    tenant_download_signed, tenant_download_unsigned,
     tenant_agreement, tenant_payments, tenant_login,
     pending_verifications,
 )
@@ -52,6 +53,8 @@ urlpatterns = [
     path('api/tenant/me/documents/<int:doc_id>/', tenant_document_detail, name='tenant-document-detail'),
     path('api/tenant/me/documents/<int:doc_id>/sign/', tenant_sign_document, name='tenant-sign-document'),
     path('api/tenant/me/documents/<int:doc_id>/upload-signed/', tenant_upload_signed, name='tenant-upload-signed'),
+    path('api/tenant/me/documents/<int:doc_id>/download-signed/', tenant_download_signed, name='tenant-download-signed'),
+    path('api/tenant/me/documents/<int:doc_id>/download-unsigned/', tenant_download_unsigned, name='tenant-download-unsigned'),
     path('api/tenant/me/payments/', tenant_payments, name='tenant-payments'),
     path('api/pending-verifications/', pending_verifications, name='pending-verifications'),
 ]
