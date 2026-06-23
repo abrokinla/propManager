@@ -11,7 +11,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
@@ -23,6 +23,7 @@ from .serializers import (
     ReminderSerializer, QuitNoticeSerializer,
     PublicPropertyListSerializer, PublicPropertyDetailSerializer,
     TenantSelfSerializer, TenantProfileUpdateSerializer,
+    NotificationListSerializer, NotificationDetailSerializer,
 )
 from .services.document_service import send_tenancy_document
 from .services.pdf_service import generate_tenancy_agreement
@@ -30,6 +31,7 @@ from .services.notice_service import issue_quit_notice
 from .services.reminder_service import send_reminder as send_reminder_svc
 from .services.storage_service import upload_file_bytes
 from .services.invitation_service import send_invitation, resend_invitation
+from .services.notification_service import notify
 from .utils import generate_unit_prefix
 
 
@@ -251,6 +253,27 @@ class UnitViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({'property_id': 'Property not found or not owned by you.'})
         serializer.save(property=prop)
 
+    def perform_update(self, serializer):
+        old = self.get_object()
+        old_price = old.price_rent
+        unit = serializer.save()
+        if old_price != unit.price_rent:
+            try:
+                tenant = unit.tenant
+                if tenant and tenant.is_active:
+                    tenant.annual_rent = unit.price_rent
+                    tenant.save(update_fields=['annual_rent'])
+                    notify(
+                        recipient=tenant.user,
+                        type='rent_change',
+                        title=f'Rent Updated — {unit.property.name}',
+                        message=f'Your rent for {unit.property.name} - {unit.unit_number} has changed from ₦{old_price:,.0f} to ₦{unit.price_rent:,.0f} per {unit.get_rent_cycle_display()}.',
+                        link='/tenant/dashboard',
+                        send_email_flag=True,
+                    )
+            except Tenant.DoesNotExist:
+                pass
+
 
 class TenantViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -367,36 +390,41 @@ class TenantViewSet(viewsets.ModelViewSet):
             document.save(update_fields=['status', 'signed_at'])
             tenant.tenancy_status = 'document_signed'
             tenant.save(update_fields=['tenancy_status'])
-            agent = request.user
-            if tenant.email:
-                from .services.email_service import send_email
-                send_email(
-                    to=tenant.email,
-                    subject='Tenancy Agreement Verified',
-                    html_body=(
-                        f'<p>Dear {tenant.name},</p>'
-                        f'<p>Your tenancy agreement for {document.tenant.unit.property.name} - '
-                        f'{document.tenant.unit.unit_number} has been verified as signed.</p>'
-                    ),
-                )
+            notify(
+                recipient=tenant.user,
+                type='document_verified',
+                title='Agreement Verified',
+                message=f'Your tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number} has been verified.',
+                link='/tenant/tenancy-agreement',
+                send_email_flag=True,
+                email_subject='Tenancy Agreement Verified',
+                email_body=(
+                    f'<p>Dear {tenant.name},</p>'
+                    f'<p>Your tenancy agreement for {document.tenant.unit.property.name} - '
+                    f'{document.tenant.unit.unit_number} has been verified as signed.</p>'
+                ),
+            )
         elif action == 'reject':
             reason = request.data.get('reason', '')
             document.status = 'sent'
             document.verification_note = reason
             document.save(update_fields=['status', 'verification_note'])
-            if tenant.email:
-                from .services.email_service import send_email
-                send_email(
-                    to=tenant.email,
-                    subject='Tenancy Agreement Verification Failed',
-                    html_body=(
-                        f'<p>Dear {tenant.name},</p>'
-                        f'<p>Your signed tenancy agreement for {document.tenant.unit.property.name} - '
-                        f'{document.tenant.unit.unit_number} was not accepted.</p>'
-                        f'<p><b>Reason:</b> {reason}</p>'
-                        f'<p>Please re-upload your signed copy.</p>'
-                    ),
-                )
+            notify(
+                recipient=tenant.user,
+                type='document_rejected',
+                title='Agreement Verification Failed',
+                message=f'Your signed tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number} was not accepted. Reason: {reason}',
+                link='/tenant/tenancy-agreement',
+                send_email_flag=True,
+                email_subject='Tenancy Agreement Verification Failed',
+                email_body=(
+                    f'<p>Dear {tenant.name},</p>'
+                    f'<p>Your signed tenancy agreement for {document.tenant.unit.property.name} - '
+                    f'{document.tenant.unit.unit_number} was not accepted.</p>'
+                    f'<p><b>Reason:</b> {reason}</p>'
+                    f'<p>Please re-upload your signed copy.</p>'
+                ),
+            )
         else:
             return Response({'error': 'action must be "verify" or "reject"'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -408,6 +436,16 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant = self.get_object()
         reason = request.data.get('reason')
         notice = issue_quit_notice(tenant, reason)
+
+        notify(
+            recipient=tenant.user,
+            type='quit_notice',
+            title='Quit Notice Issued',
+            message=f'A quit notice has been issued for {tenant.unit.property.name} - {tenant.unit.unit_number}. Reason: {reason}',
+            link='/tenant/dashboard',
+            send_email_flag=True,
+        )
+
         serializer = QuitNoticeSerializer(notice)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -527,6 +565,15 @@ class PaymentViewSet(viewsets.ModelViewSet):
                     tenant.tenancy_status = 'active'
                 tenant.save(update_fields=['lease_start_date', 'lease_expiry_date', 'lease_renewal_date', 'tenancy_status'])
 
+        notify(
+            recipient=tenant.user,
+            type='payment_approved',
+            title='Payment Approved',
+            message=f'Your payment of ₦{float(payment.amount):,.0f} for {tenant.unit.property.name} has been approved.',
+            link='/tenant/dashboard',
+            send_email_flag=True,
+        )
+
         serializer = self.get_serializer(payment)
         return Response(serializer.data)
 
@@ -541,6 +588,16 @@ class PaymentViewSet(viewsets.ModelViewSet):
         payment.approved_by = request.user
         payment.approved_at = datetime.now()
         payment.save(update_fields=['status', 'rejection_reason', 'approved_by', 'approved_at'])
+
+        notify(
+            recipient=payment.tenant.user,
+            type='payment_rejected',
+            title='Payment Rejected',
+            message=f'Your payment of ₦{float(payment.amount):,.0f} for {payment.tenant.unit.property.name} has been rejected. Reason: {reason}',
+            link='/tenant/dashboard',
+            send_email_flag=True,
+        )
+
         serializer = self.get_serializer(payment)
         return Response(serializer.data)
 
@@ -574,6 +631,34 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
         return Response({'uploaded_pdf_url': url})
 
 
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+
+    def get_queryset(self):
+        return Notification.objects.filter(recipient=self.request.user)
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return NotificationListSerializer
+        return NotificationDetailSerializer
+
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        count = self.get_queryset().filter(is_read=False).count()
+        return Response({'count': count})
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.is_read = True
+        notification.save(update_fields=['is_read'])
+        return Response({'status': 'ok'})
+
+    @action(detail=False, methods=['post'])
+    def mark_all_read(self, request):
+        self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({'status': 'ok'})
+
+
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description', 'status', 'priority', 'reported_by']
@@ -593,7 +678,20 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         if not reported_by:
             user = self.request.user
             reported_by = user.get_full_name() or user.username
-        serializer.save(reported_by=reported_by)
+        req = serializer.save(reported_by=reported_by)
+        try:
+            tenant = req.unit.tenant
+            if tenant and tenant.is_active:
+                notify(
+                    recipient=tenant.user,
+                    type='maintenance_request',
+                    title=f'Maintenance Request — {req.unit.unit_number}',
+                    message=f'A maintenance request has been logged: {req.title}. Status: {req.status}.',
+                    link='/tenant/dashboard',
+                    send_email_flag=True,
+                )
+        except Tenant.DoesNotExist:
+            pass
 
 
 @api_view(['GET'])
@@ -713,19 +811,21 @@ def tenant_upload_signed(request, doc_id):
     document.save(update_fields=['signed_file_url', 'status'])
 
     agent = document.tenant.unit.property.owner
-    if agent and agent.email:
-        from .services.email_service import send_email
-        send_email(
-            to=agent.email,
-            subject=f'Signed Agreement Submitted - {tenant.name}',
-            html_body=(
-                f'<p>Dear {agent.get_full_name() or agent.username},</p>'
-                f'<p>{tenant.name} has uploaded a signed copy of the tenancy agreement for '
-                f'{document.tenant.unit.property.name} - {document.tenant.unit.unit_number}.</p>'
-                f'<p>Please verify the document in your dashboard.</p>'
-                f'<p><a href="{url}">View uploaded signed copy</a></p>'
-            ),
-        )
+    notify(
+        recipient=agent,
+        type='document_uploaded',
+        title=f'Signed Agreement Submitted — {tenant.name}',
+        message=f'{tenant.name} has uploaded a signed copy of the tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number}. Please verify it.',
+        link='/tenants',
+        send_email_flag=True,
+        email_subject=f'Signed Agreement Submitted - {tenant.name}',
+        email_body=(
+            f'<p>Dear {agent.get_full_name() or agent.username},</p>'
+            f'<p>{tenant.name} has uploaded a signed copy of the tenancy agreement for '
+            f'{document.tenant.unit.property.name} - {document.tenant.unit.unit_number}.</p>'
+            f'<p>Please verify the document in your dashboard.</p>'
+        ),
+    )
 
     return Response({
         'status': 'pending_verification',
@@ -785,7 +885,16 @@ def tenant_sign_document(request, doc_id):
     tenant.save(update_fields=['tenancy_status'])
 
     agent = document.tenant.unit.property.owner
-    if agent and agent.email:
+    notify(
+        recipient=agent,
+        type='document_signed',
+        title=f'Agreement Signed — {tenant.name}',
+        message=f'{tenant.name} has signed the tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number}.',
+        link='/tenants',
+        send_email_flag=False,
+    )
+
+    if agent.email:
         from .services.email_service import send_email
         send_email(
             to=agent.email,
@@ -959,6 +1068,42 @@ def pending_verifications(request):
     } for d in docs])
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_express_interest(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    property_id = request.data.get('property_id')
+    if not property_id:
+        return Response({'error': 'property_id is required'}, status=400)
+    try:
+        prop = Property.objects.get(id=property_id, is_published=True)
+    except Property.DoesNotExist:
+        return Response({'error': 'Property not found'}, status=404)
+
+    agent = prop.owner
+    message = request.data.get('message', f'{tenant.name} is interested in buying/renting {prop.name}.')
+
+    notify(
+        recipient=agent,
+        type='purchase_interest',
+        title=f'Interest in {prop.name}',
+        message=message,
+        link='/properties',
+        send_email_flag=True,
+        email_subject=f'Purchase Interest — {prop.name}',
+        email_body=(
+            f'<p>Dear {agent.get_full_name() or agent.username},</p>'
+            f'<p>{tenant.name} has expressed interest in <b>{prop.name}</b>.</p>'
+            f'<p><b>Message:</b> {message}</p>'
+            f'<p>Contact: {tenant.email} | {tenant.phone}</p>'
+        ),
+    )
+
+    return Response({'status': 'interest expressed'})
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def tenant_payments(request):
@@ -982,6 +1127,15 @@ def tenant_payments(request):
 
     serializer = TenantPaymentSerializer(data=data)
     if serializer.is_valid():
-        serializer.save(tenant=tenant, proof_url=proof_url)
+        payment = serializer.save(tenant=tenant, proof_url=proof_url)
+        agent = tenant.unit.property.owner
+        notify(
+            recipient=agent,
+            type='payment_received',
+            title=f'Payment Received — {tenant.name}',
+            message=f'{tenant.name} has submitted a payment of ₦{float(payment.amount):,.0f} for {tenant.unit.property.name} - {tenant.unit.unit_number}.',
+            link='/payments',
+            send_email_flag=True,
+        )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

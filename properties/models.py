@@ -391,3 +391,33 @@ class MaintenanceRequest(models.Model):
 
     def __str__(self):
         return f"{self.unit.unit_number} - {self.title}"
+
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = [
+        ('rent_change', 'Rent Change'),
+        ('quit_notice', 'Quit Notice Issued'),
+        ('payment_received', 'Payment Received'),
+        ('payment_approved', 'Payment Approved'),
+        ('payment_rejected', 'Payment Rejected'),
+        ('maintenance_request', 'Maintenance Request'),
+        ('document_signed', 'Document Signed'),
+        ('document_uploaded', 'Document Uploaded'),
+        ('document_verified', 'Document Verified'),
+        ('document_rejected', 'Document Rejected'),
+        ('purchase_interest', 'Purchase Interest'),
+    ]
+
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    link = models.CharField(max_length=500, blank=True, default='')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.type}] {self.title}"

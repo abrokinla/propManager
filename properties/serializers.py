@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice, TenancyAgreementTemplate
+from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice, TenancyAgreementTemplate, Notification
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -407,3 +407,15 @@ class DashboardStatsSerializer(serializers.Serializer):
     upcoming_lease_expirations = serializers.ListField()
     recent_payments = DashboardPaymentSerializer(many=True)
     open_maintenance = serializers.IntegerField()
+
+
+class NotificationListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'type', 'title', 'message', 'link', 'is_read', 'created_at']
+
+
+class NotificationDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'type', 'title', 'message', 'link', 'is_read', 'created_at']

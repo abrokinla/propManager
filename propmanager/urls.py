@@ -8,7 +8,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
     PaymentViewSet, MaintenanceRequestViewSet,
-    AgreementTemplateViewSet,
+    AgreementTemplateViewSet, NotificationViewSet,
     register_view, login_view, dashboard_stats, profile_view,
     health_check, public_document_detail, public_document_sign,
     upload_image,
@@ -17,6 +17,7 @@ from properties.views import (
     tenant_upload_signed, tenant_documents, tenant_document_detail,
     tenant_download_signed, tenant_download_unsigned,
     tenant_agreement, tenant_payments, tenant_login,
+    tenant_express_interest,
     pending_verifications,
 )
 
@@ -27,6 +28,7 @@ router.register(r'tenants', TenantViewSet, basename='tenant')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'agreement-templates', AgreementTemplateViewSet, basename='agreement-template')
 router.register(r'maintenance', MaintenanceRequestViewSet, basename='maintenance')
+router.register(r'notifications', NotificationViewSet, basename='notification')
 
 resend_invite_view = TenantViewSet.as_view({'post': 'resend_invite'})
 
@@ -56,5 +58,6 @@ urlpatterns = [
     path('api/tenant/me/documents/<int:doc_id>/download-signed/', tenant_download_signed, name='tenant-download-signed'),
     path('api/tenant/me/documents/<int:doc_id>/download-unsigned/', tenant_download_unsigned, name='tenant-download-unsigned'),
     path('api/tenant/me/payments/', tenant_payments, name='tenant-payments'),
+    path('api/tenant/me/express-interest/', tenant_express_interest, name='tenant-express-interest'),
     path('api/pending-verifications/', pending_verifications, name='pending-verifications'),
 ]
