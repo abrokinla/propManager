@@ -1107,6 +1107,63 @@ def tenant_express_interest(request):
     return Response({'status': 'interest expressed'})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_change_password(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    if not current_password or not new_password:
+        return Response({'error': 'current_password and new_password are required'}, status=400)
+    if len(new_password) < 8:
+        return Response({'error': 'Password must be at least 8 characters'}, status=400)
+
+    if not request.user.check_password(current_password):
+        return Response({'error': 'Current password is incorrect'}, status=400)
+
+    request.user.set_password(new_password)
+    request.user.save()
+    return Response({'status': 'password updated'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_create_maintenance(request):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+
+    tenant = request.user.tenant_profile
+    title = request.data.get('title')
+    description = request.data.get('description')
+    priority = request.data.get('priority', 'Medium')
+
+    if not title or not description:
+        return Response({'error': 'title and description are required'}, status=400)
+
+    req = MaintenanceRequest.objects.create(
+        unit=tenant.unit,
+        title=title,
+        description=description,
+        priority=priority,
+        reported_by=tenant.name,
+    )
+
+    agent = tenant.unit.property.owner
+    notify(
+        recipient=agent,
+        type='maintenance_request',
+        title=f'Maintenance Request — {tenant.unit.unit_number}',
+        message=f'{tenant.name} reported: {title}.',
+        link='/maintenance',
+        send_email_flag=True,
+    )
+
+    serializer = MaintenanceRequestListSerializer(req)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def tenant_payments(request):
