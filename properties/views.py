@@ -258,21 +258,21 @@ class UnitViewSet(viewsets.ModelViewSet):
         old_price = old.price_rent
         unit = serializer.save()
         if old_price != unit.price_rent:
-            try:
-                tenant = unit.tenant
-                if tenant and tenant.is_active:
-                    tenant.annual_rent = unit.price_rent
-                    tenant.save(update_fields=['annual_rent'])
-                    notify(
-                        recipient=tenant.user,
-                        type='rent_change',
-                        title=f'Rent Updated — {unit.property.name}',
-                        message=f'Your rent for {unit.property.name} - {unit.unit_number} has changed from ₦{old_price:,.0f} to ₦{unit.price_rent:,.0f} per {unit.get_rent_cycle_display()}.',
-                        link='/tenant/dashboard',
-                        send_email_flag=True,
-                    )
-            except Tenant.DoesNotExist:
-                pass
+            tenant = getattr(unit, 'tenant', None)
+            if not tenant or not tenant.is_active:
+                tenant = Tenant.objects.filter(unit=unit, is_active=True).first()
+            if tenant:
+                tenant.annual_rent = unit.price_rent
+                tenant.save(update_fields=['annual_rent'])
+                logger.info(f"Synced Tenant {tenant.id} annual_rent to {unit.price_rent} (was {old_price})")
+                notify(
+                    recipient=tenant.user,
+                    type='rent_change',
+                    title=f'Rent Updated — {unit.property.name}',
+                    message=f'Your rent for {unit.property.name} - {unit.unit_number} has changed from ₦{old_price:,.0f} to ₦{unit.price_rent:,.0f} per {unit.get_rent_cycle_display()}.',
+                    link='/tenant/dashboard',
+                    send_email_flag=True,
+                )
 
 
 class TenantViewSet(viewsets.ModelViewSet):
@@ -305,6 +305,9 @@ class TenantViewSet(viewsets.ModelViewSet):
                 'Mark an existing tenant as inactive before adding a new one.'
             )
         tenant = serializer.save()
+        if not tenant.annual_rent and unit_obj.price_rent:
+            tenant.annual_rent = unit_obj.price_rent
+            tenant.save(update_fields=['annual_rent'])
         tenant.unit.status = 'Occupied'
         tenant.unit.save(update_fields=['status'])
         if tenant.email:
