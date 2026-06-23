@@ -1128,13 +1128,19 @@ def tenant_change_password(request):
     return Response({'status': 'password updated'})
 
 
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
-def tenant_create_maintenance(request):
+def tenant_maintenance(request):
     if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
         return Response({'error': 'Not a tenant user'}, status=403)
 
     tenant = request.user.tenant_profile
+
+    if request.method == 'GET':
+        requests = MaintenanceRequest.objects.filter(unit=tenant.unit).order_by('-created_at')
+        serializer = MaintenanceRequestListSerializer(requests, many=True)
+        return Response(serializer.data)
+
     title = request.data.get('title')
     description = request.data.get('description')
     priority = request.data.get('priority', 'Medium')
