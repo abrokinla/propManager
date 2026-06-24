@@ -756,6 +756,37 @@ def public_document_sign(request, token):
     return Response({'status': 'signed', 'signed_file_url': url})
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_document_download_unsigned(request, token):
+    document = get_object_or_404(TenancyDocument, access_token=token)
+    url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
+    if not url:
+        return Response({'error': 'No file available'}, status=404)
+    import urllib.request
+    resp = urllib.request.urlopen(url)
+    content = resp.read()
+    content_type = resp.headers.get('Content-Type', 'application/pdf')
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="agreement_{document.id}.pdf"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_document_download_signed(request, token):
+    document = get_object_or_404(TenancyDocument, access_token=token)
+    if not document.signed_file_url:
+        return Response({'error': 'No signed file available'}, status=404)
+    import urllib.request
+    resp = urllib.request.urlopen(document.signed_file_url)
+    content = resp.read()
+    content_type = resp.headers.get('Content-Type', 'application/pdf')
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="signed_agreement_{document.id}.pdf"'
+    return response
+
+
 # ── Tenant Self-Service Endpoints ──────────────────────────────────────────
 
 @api_view(['POST'])
