@@ -210,6 +210,7 @@ class TenancyDocument(models.Model):
     access_token = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     sent_at = models.DateTimeField(null=True, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
+    unsigned_emailed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

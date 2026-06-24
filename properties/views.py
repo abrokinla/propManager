@@ -419,14 +419,30 @@ class TenantViewSet(viewsets.ModelViewSet):
                 title='Agreement Verified',
                 message=f'Your tenancy agreement for {document.tenant.unit.property.name} - {document.tenant.unit.unit_number} has been verified.',
                 link='/tenancy-agreement',
-                send_email_flag=True,
-                email_subject='Tenancy Agreement Verified',
-                email_body=(
-                    f'<p>Dear {tenant.name},</p>'
-                    f'<p>Your tenancy agreement for {document.tenant.unit.property.name} - '
-                    f'{document.tenant.unit.unit_number} has been verified as signed.</p>'
-                ),
+                send_email_flag=False,
             )
+            tenant_email = tenant.user.email if tenant.user and tenant.user.email else tenant.email
+            if tenant_email and document.signed_file_url:
+                try:
+                    src, _ = cloudinary_url(document.signed_file_url, sign_url=True, resource_type='raw')
+                    import urllib.request
+                    resp = urllib.request.urlopen(src)
+                    pdf_bytes = resp.read()
+                    from .services.email_service import send_email
+                    send_email(
+                        to=tenant_email,
+                        subject='Your Signed Tenancy Agreement',
+                        html_body=(
+                            f'<p>Dear {tenant.name},</p>'
+                            f'<p>Your tenancy agreement for {document.tenant.unit.property.name} - '
+                            f'{document.tenant.unit.unit_number} has been verified as signed.</p>'
+                            f'<p>A signed copy is attached to this email.</p>'
+                        ),
+                        attachment_bytes=pdf_bytes,
+                        attachment_filename=f'signed_agreement_{document.id}.pdf',
+                    )
+                except Exception as e:
+                    logger.exception(f"Failed to email signed document {document.id}: {e}")
         elif action == 'reject':
             reason = request.data.get('reason', '')
             document.status = 'sent'
@@ -964,6 +980,19 @@ def tenant_sign_document(request, doc_id):
             attachment_filename=filename,
         )
 
+    tenant_email = tenant.user.email if tenant.user and tenant.user.email else tenant.email
+    if tenant_email:
+        send_email(
+            to=tenant_email,
+            subject='Your Signed Tenancy Agreement',
+            html_body=(
+                f'<p>Dear {tenant.name},</p>'
+                f'<p>Your tenancy agreement has been signed successfully. A copy is attached to this email.</p>'
+            ),
+            attachment_bytes=pdf_bytes,
+            attachment_filename=filename,
+        )
+
     return Response({'status': 'signed', 'signed_file_url': url, 'signed_at': document.signed_at})
 
 
@@ -1016,6 +1045,100 @@ def tenant_download_unsigned(request, doc_id):
     return HttpResponseRedirect(signed_url)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_email_unsigned(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    if document.status not in ('sent', 'viewed'):
+        return Response({'error': 'Document is not in a sendable state'}, status=400)
+    _email_unsigned(tenant, document)
+    return Response({'status': 'sent'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_email_signed(request, doc_id):
+    if not hasattr(request.user, 'tenant_profile') or not request.user.tenant_profile:
+        return Response({'error': 'Not a tenant user'}, status=403)
+    tenant = request.user.tenant_profile
+    document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
+    if document.status != 'signed':
+        return Response({'error': 'Document is not signed'}, status=400)
+    if not document.signed_file_url:
+        return Response({'error': 'No signed file available'}, status=404)
+    try:
+        src, _ = cloudinary_url(document.signed_file_url, sign_url=True, resource_type='raw')
+        import urllib.request
+        resp = urllib.request.urlopen(src)
+        pdf_bytes = resp.read()
+        from .services.email_service import send_email
+        tenant_email = tenant.user.email if tenant.user and tenant.user.email else tenant.email
+        send_email(
+            to=tenant_email,
+            subject='Your Signed Tenancy Agreement',
+            html_body=(
+                f'<p>Dear {tenant.name},</p>'
+                f'<p>Your signed tenancy agreement is attached to this email.</p>'
+            ),
+            attachment_bytes=pdf_bytes,
+            attachment_filename=f'signed_agreement_{document.id}.pdf',
+        )
+        return Response({'status': 'sent'})
+    except Exception as e:
+        logger.exception(f"Failed to email signed document {document.id}: {e}")
+        return Response({'error': 'Failed to send email'}, status=500)
+
+
+def _email_unsigned(tenant, document):
+    if document.unsigned_emailed_at:
+        return
+    from .services.email_service import send_email
+    import urllib.request
+    try:
+        if document.mode == 'uploaded_pdf':
+            url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
+            if not url:
+                return
+            src, _ = cloudinary_url(url, sign_url=True, resource_type='raw')
+            resp = urllib.request.urlopen(src)
+            pdf_bytes = resp.read()
+            filename = f"agreement_{document.id}.pdf"
+        else:
+            pdf_bytes = generate_tenancy_agreement(
+                dict(document.document_data),
+                logo_url=_get_logo(document),
+            )
+            filename = f"tenancy_agreement_{tenant.id}.pdf"
+
+        send_email(
+            to=tenant.user.email if tenant.user and tenant.user.email else tenant.email,
+            subject='Your Tenancy Agreement – Please Sign',
+            html_body=(
+                f'<p>Dear {tenant.name},</p>'
+                f'<p>Your tenancy agreement is ready. Please find it attached.</p>'
+                f'<p>Print and sign the document, then upload the signed copy on the PropManager platform.</p>'
+                f'<p>If you have any questions, please contact your agent.</p>'
+            ),
+            attachment_bytes=pdf_bytes,
+            attachment_filename=filename,
+        )
+        document.unsigned_emailed_at = datetime.now()
+        document.save(update_fields=['unsigned_emailed_at'])
+    except Exception as e:
+        logger.exception(f"Failed to email unsigned document {document.id}: {e}")
+
+
+def _get_logo(document):
+    try:
+        template = TenancyAgreementTemplate.objects.get(property=document.tenant.unit.property)
+        return template.logo_url
+    except TenancyAgreementTemplate.DoesNotExist:
+        return ''
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def tenant_agreement(request):
@@ -1030,6 +1153,7 @@ def tenant_agreement(request):
         if existing.status == 'sent' and existing.verification_note and request.GET.get('cleared'):
             existing.verification_note = ''
             existing.save(update_fields=['verification_note'])
+        _email_unsigned(tenant, existing)
         serializer = TenancyDocumentDetailSerializer(existing)
         return Response(serializer.data)
 
@@ -1047,6 +1171,7 @@ def tenant_agreement(request):
             file_url=template.uploaded_pdf_url,
             sent_at=datetime.now(),
         )
+        _email_unsigned(tenant, document)
         serializer = TenancyDocumentDetailSerializer(document)
         return Response(serializer.data)
 
@@ -1092,6 +1217,7 @@ def tenant_agreement(request):
         sent_at=datetime.now(),
     )
 
+    _email_unsigned(tenant, document)
     serializer = TenancyDocumentDetailSerializer(document)
     return Response(serializer.data)
 
