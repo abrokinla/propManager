@@ -765,10 +765,8 @@ def public_document_download_unsigned(request, token):
     url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
     if not url:
         return Response({'error': 'No file available'}, status=404)
-    signed_url, _ = cloudinary_url(url, sign_url=True)
-    response = HttpResponseRedirect(signed_url)
-    response['Content-Disposition'] = f'attachment; filename="agreement_{document.id}.pdf"'
-    return response
+    signed_url, _ = cloudinary_url(url, sign_url=True, resource_type='raw', attachment=f'agreement_{document.id}.pdf')
+    return HttpResponseRedirect(signed_url)
 
 
 @api_view(['GET'])
@@ -777,10 +775,8 @@ def public_document_download_signed(request, token):
     document = get_object_or_404(TenancyDocument, access_token=token)
     if not document.signed_file_url:
         return Response({'error': 'No signed file available'}, status=404)
-    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True)
-    response = HttpResponseRedirect(signed_url)
-    response['Content-Disposition'] = f'attachment; filename="signed_agreement_{document.id}.pdf"'
-    return response
+    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True, resource_type='raw', attachment=f'signed_agreement_{document.id}.pdf')
+    return HttpResponseRedirect(signed_url)
 
 
 # ── Tenant Self-Service Endpoints ──────────────────────────────────────────
@@ -1002,10 +998,8 @@ def tenant_download_signed(request, doc_id):
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
     if not document.signed_file_url:
         return Response({'error': 'No signed file available'}, status=404)
-    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True)
-    response = HttpResponseRedirect(signed_url)
-    response['Content-Disposition'] = f'attachment; filename="signed_agreement_{doc_id}.pdf"'
-    return response
+    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True, resource_type='raw', attachment=f'signed_agreement_{doc_id}.pdf')
+    return HttpResponseRedirect(signed_url)
 
 
 @api_view(['GET'])
@@ -1018,10 +1012,8 @@ def tenant_download_unsigned(request, doc_id):
     url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
     if not url:
         return Response({'error': 'No file available'}, status=404)
-    signed_url, _ = cloudinary_url(url, sign_url=True)
-    response = HttpResponseRedirect(signed_url)
-    response['Content-Disposition'] = f'attachment; filename="agreement_{doc_id}.pdf"'
-    return response
+    signed_url, _ = cloudinary_url(url, sign_url=True, resource_type='raw', attachment=f'agreement_{doc_id}.pdf')
+    return HttpResponseRedirect(signed_url)
 
 
 @api_view(['GET'])
