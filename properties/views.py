@@ -6,7 +6,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 from django.db.models import Count, F, Sum, Q
 from django.shortcuts import get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
+from cloudinary.utils import cloudinary_url
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
@@ -511,6 +512,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 class PaymentViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['tenant']
     search_fields = ['reference', 'payment_method', 'notes', 'status']
     ordering_fields = ['amount', 'payment_date', 'created_at']
     ordering = ['-payment_date']
@@ -665,7 +667,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             return NotificationListSerializer
         return NotificationDetailSerializer
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], url_path='unread-count')
     def unread_count(self, request):
         count = self.get_queryset().filter(is_read=False).count()
         return Response({'count': count})
@@ -677,7 +679,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         notification.save(update_fields=['is_read'])
         return Response({'status': 'ok'})
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):
         self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': 'ok'})
@@ -763,11 +765,8 @@ def public_document_download_unsigned(request, token):
     url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
     if not url:
         return Response({'error': 'No file available'}, status=404)
-    import urllib.request
-    resp = urllib.request.urlopen(url)
-    content = resp.read()
-    content_type = resp.headers.get('Content-Type', 'application/pdf')
-    response = HttpResponse(content, content_type=content_type)
+    signed_url, _ = cloudinary_url(url, sign_url=True)
+    response = HttpResponseRedirect(signed_url)
     response['Content-Disposition'] = f'attachment; filename="agreement_{document.id}.pdf"'
     return response
 
@@ -778,11 +777,8 @@ def public_document_download_signed(request, token):
     document = get_object_or_404(TenancyDocument, access_token=token)
     if not document.signed_file_url:
         return Response({'error': 'No signed file available'}, status=404)
-    import urllib.request
-    resp = urllib.request.urlopen(document.signed_file_url)
-    content = resp.read()
-    content_type = resp.headers.get('Content-Type', 'application/pdf')
-    response = HttpResponse(content, content_type=content_type)
+    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True)
+    response = HttpResponseRedirect(signed_url)
     response['Content-Disposition'] = f'attachment; filename="signed_agreement_{document.id}.pdf"'
     return response
 
@@ -1006,11 +1002,8 @@ def tenant_download_signed(request, doc_id):
     document = get_object_or_404(TenancyDocument, id=doc_id, tenant=tenant)
     if not document.signed_file_url:
         return Response({'error': 'No signed file available'}, status=404)
-    import urllib.request
-    resp = urllib.request.urlopen(document.signed_file_url)
-    content = resp.read()
-    content_type = resp.headers.get('Content-Type', 'application/pdf')
-    response = HttpResponse(content, content_type=content_type)
+    signed_url, _ = cloudinary_url(document.signed_file_url, sign_url=True)
+    response = HttpResponseRedirect(signed_url)
     response['Content-Disposition'] = f'attachment; filename="signed_agreement_{doc_id}.pdf"'
     return response
 
@@ -1025,11 +1018,8 @@ def tenant_download_unsigned(request, doc_id):
     url = document.file_url or (document.document_data or {}).get('uploaded_pdf_url', '')
     if not url:
         return Response({'error': 'No file available'}, status=404)
-    import urllib.request
-    resp = urllib.request.urlopen(url)
-    content = resp.read()
-    content_type = resp.headers.get('Content-Type', 'application/pdf')
-    response = HttpResponse(content, content_type=content_type)
+    signed_url, _ = cloudinary_url(url, sign_url=True)
+    response = HttpResponseRedirect(signed_url)
     response['Content-Disposition'] = f'attachment; filename="agreement_{doc_id}.pdf"'
     return response
 
