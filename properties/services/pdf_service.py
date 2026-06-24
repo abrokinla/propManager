@@ -178,12 +178,6 @@ def generate_tenancy_agreement(document_data: dict, signature_name: str = None, 
             ['Amount', f"₦{float(caution['amount']):,.2f} ({caution.get('currency', 'NGN')})"],
             ['Type', caution.get('type', '')],
         ]
-        if caution.get('deducted_for'):
-            cf_data.append(['Deducted For', caution['deducted_for']])
-        if caution.get('refunded_if'):
-            cf_data.append(['Refunded If', caution['refunded_if']])
-        if caution.get('top_up'):
-            cf_data.append(['Top Up', caution['top_up']])
         ct = Table(cf_data, colWidths=[4.5*cm, 11*cm])
         ct.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -196,6 +190,13 @@ def generate_tenancy_agreement(document_data: dict, signature_name: str = None, 
         ]))
         elements.append(ct)
         elements.append(Spacer(1, 6))
+
+        for field, label in [('deducted_for', 'Deducted For'), ('refunded_if', 'Refunded If'), ('top_up', 'Top Up')]:
+            html = caution.get(field, '')
+            if html:
+                elements.append(Paragraph(f"<b>{label}</b>", normal))
+                elements += _html_to_elements(html, clause_style)
+                elements.append(Spacer(1, 4))
 
     # ── Tenant's Covenants ──
     tc_html = document_data.get('tenants_covenants', '')
