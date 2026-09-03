@@ -9,11 +9,13 @@ from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
     PaymentViewSet, MaintenanceRequestViewSet,
     AgreementTemplateViewSet, NotificationViewSet,
+    PropertyAvailabilityViewSet, VisitBookingViewSet,
     register_view, login_view, dashboard_stats, profile_view,
     health_check, public_document_detail, public_document_sign,
     public_document_download_signed, public_document_download_unsigned,
     upload_image,
     public_properties_list, public_property_detail, public_property_detail_by_slug, public_agent_properties,
+    public_property_available_slots, public_book_visit,
     tenant_me, tenant_complete_profile, tenant_sign_document,
     tenant_upload_signed, tenant_documents, tenant_document_detail,
     tenant_download_signed, tenant_download_unsigned,
@@ -31,6 +33,8 @@ router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'agreement-templates', AgreementTemplateViewSet, basename='agreement-template')
 router.register(r'maintenance', MaintenanceRequestViewSet, basename='maintenance')
 router.register(r'notifications', NotificationViewSet, basename='notification')
+router.register(r'availability', PropertyAvailabilityViewSet, basename='availability')
+router.register(r'bookings', VisitBookingViewSet, basename='booking')
 
 resend_invite_view = TenantViewSet.as_view({'post': 'resend_invite'})
 
@@ -53,6 +57,8 @@ urlpatterns = [
     path('api/public/properties/<int:pk>/', public_property_detail, name='public-property-detail'),
     path('api/public/properties/slug/<slug:slug>/', public_property_detail_by_slug, name='public-property-detail-by-slug'),
     path('api/public/properties/agent/<slug:slug>/', public_agent_properties, name='public-agent-properties'),
+    path('api/public/properties/slug/<slug:slug>/slots/', public_property_available_slots, name='public-available-slots'),
+    path('api/public/properties/slug/<slug:slug>/book/', public_book_visit, name='public-book-visit'),
     path('api/tenant/login/', tenant_login, name='tenant-login'),
     path('api/tenant/me/', tenant_me, name='tenant-me'),
     path('api/tenant/me/complete-profile/', tenant_complete_profile, name='tenant-complete-profile'),

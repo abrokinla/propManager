@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice, TenancyAgreementTemplate, Notification
+import urllib.parse
+from .models import UserProfile, Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, Reminder, QuitNotice, TenancyAgreementTemplate, Notification, PropertyAvailability, VisitBooking
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -421,3 +422,68 @@ class NotificationDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = ['id', 'type', 'title', 'message', 'link', 'is_read', 'created_at']
+
+
+# ── Visit Booking ──────────────────────────────────────────────────────────
+
+class PropertyAvailabilitySerializer(serializers.ModelSerializer):
+    day_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+
+    class Meta:
+        model = PropertyAvailability
+        fields = ['id', 'day_of_week', 'day_display', 'start_time', 'end_time',
+                  'slot_duration_minutes', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class PropertyAvailabilityListSerializer(serializers.ModelSerializer):
+    day_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+
+    class Meta:
+        model = PropertyAvailability
+        fields = ['id', 'day_of_week', 'day_display', 'start_time', 'end_time',
+                  'slot_duration_minutes', 'is_active']
+
+
+class VisitBookingSerializer(serializers.ModelSerializer):
+    property_name = serializers.CharField(source='property.name', read_only=True)
+    property_address = serializers.CharField(source='property.address', read_only=True)
+    whatsapp_link = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitBooking
+        fields = ['id', 'property', 'property_name', 'property_address', 'availability',
+                  'guest_name', 'guest_email', 'guest_phone', 'visit_date', 'visit_time',
+                  'status', 'notes', 'whatsapp_enabled', 'whatsapp_link',
+                  'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_whatsapp_link(self, obj):
+        if not obj.guest_phone:
+            return ''
+        phone = obj.guest_phone.replace('+', '').replace(' ', '').replace('-', '')
+        msg = (
+            f"Hello {obj.guest_name}, this is regarding your visit to {obj.property.name} "
+            f"on {obj.visit_date} at {obj.visit_time}. "
+            f"Please confirm if you are still available."
+        )
+        return f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}"
+
+
+class VisitBookingListSerializer(serializers.ModelSerializer):
+    property_name = serializers.CharField(source='property.name', read_only=True)
+
+    class Meta:
+        model = VisitBooking
+        fields = ['id', 'property', 'property_name', 'guest_name', 'guest_email',
+                  'visit_date', 'visit_time', 'status', 'whatsapp_enabled', 'created_at']
+
+
+class PublicBookingCreateSerializer(serializers.Serializer):
+    guest_name = serializers.CharField(max_length=200)
+    guest_email = serializers.EmailField()
+    guest_phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    visit_date = serializers.DateField()
+    visit_time = serializers.TimeField()
+    notes = serializers.CharField(required=False, allow_blank=True)
+    whatsapp_enabled = serializers.BooleanField(default=False)

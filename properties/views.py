@@ -12,7 +12,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification, UserProfile
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification, UserProfile, PropertyAvailability, VisitBooking
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
@@ -25,6 +25,8 @@ from .serializers import (
     PublicPropertyListSerializer, PublicPropertyDetailSerializer,
     TenantSelfSerializer, TenantProfileUpdateSerializer,
     NotificationListSerializer, NotificationDetailSerializer,
+    PropertyAvailabilitySerializer, PropertyAvailabilityListSerializer,
+    VisitBookingSerializer, VisitBookingListSerializer, PublicBookingCreateSerializer,
 )
 from .services.document_service import send_tenancy_document
 from .services.pdf_service import generate_tenancy_agreement
@@ -1390,3 +1392,206 @@ def tenant_payments(request):
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ── Visit Booking ──────────────────────────────────────────────────────────
+
+class PropertyAvailabilityViewSet(viewsets.ModelViewSet):
+    serializer_class = PropertyAvailabilitySerializer
+
+    def get_queryset(self):
+        return PropertyAvailability.objects.filter(
+            property__owner=self.request.user
+        ).select_related('property')
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PropertyAvailabilityListSerializer
+        return PropertyAvailabilitySerializer
+
+    def perform_create(self, serializer):
+        property_obj = get_object_or_404(Property, pk=self.request.data.get('property'), owner=self.request.user)
+        serializer.save(property=property_obj)
+
+
+class VisitBookingViewSet(viewsets.ModelViewSet):
+    serializer_class = VisitBookingSerializer
+
+    def get_queryset(self):
+        return VisitBooking.objects.filter(
+            property__owner=self.request.user
+        ).select_related('property', 'availability')
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return VisitBookingListSerializer
+        return VisitBookingSerializer
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status != 'pending':
+            return Response({'error': 'Only pending bookings can be confirmed'}, status=400)
+        booking.status = 'confirmed'
+        booking.save()
+        notify(
+            recipient=request.user,
+            type='visit_confirmed',
+            title=f'Visit Confirmed — {booking.guest_name}',
+            message=f'Visit with {booking.guest_name} at {booking.property.name} on {booking.visit_date} {booking.visit_time} has been confirmed.',
+            link='/dashboard/bookings',
+            send_email_flag=True,
+        )
+        try:
+            from .services.email_service import send_email
+            send_email(
+                to=booking.guest_email,
+                subject=f'Visit Confirmed — {booking.property.name}',
+                html_body=(
+                    f'<p>Hello {booking.guest_name},</p>'
+                    f'<p>Your visit to <strong>{booking.property.name}</strong> at '
+                    f'<strong>{booking.property.address}</strong> has been confirmed.</p>'
+                    f'<p><strong>Date:</strong> {booking.visit_date}</p>'
+                    f'<p><strong>Time:</strong> {booking.visit_time}</p>'
+                    f'<p>We look forward to seeing you!</p>'
+                ),
+            )
+        except Exception as e:
+            logger.error(f"Failed to send booking confirmation email: {e}")
+        return Response(VisitBookingSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status in ('cancelled', 'completed'):
+            return Response({'error': f'Cannot cancel a {booking.status} booking'}, status=400)
+        booking.status = 'cancelled'
+        booking.save()
+        notify(
+            recipient=request.user,
+            type='visit_cancelled',
+            title=f'Visit Cancelled — {booking.guest_name}',
+            message=f'Visit with {booking.guest_name} at {booking.property.name} on {booking.visit_date} has been cancelled.',
+            link='/dashboard/bookings',
+            send_email_flag=False,
+        )
+        try:
+            from .services.email_service import send_email
+            send_email(
+                to=booking.guest_email,
+                subject=f'Visit Cancelled — {booking.property.name}',
+                html_body=(
+                    f'<p>Hello {booking.guest_name},</p>'
+                    f'<p>Your visit to <strong>{booking.property.name}</strong> on '
+                    f'<strong>{booking.visit_date}</strong> has been cancelled.</p>'
+                    f'<p>Please contact the property manager for more information.</p>'
+                ),
+            )
+        except Exception as e:
+            logger.error(f"Failed to send booking cancellation email: {e}")
+        return Response(VisitBookingSerializer(booking).data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_property_available_slots(request, slug):
+    """Get available time slots for a property on a given date (public)."""
+    property_obj = get_object_or_404(Property, public_slug=slug, is_published=True)
+    date_str = request.query_params.get('date')
+    if not date_str:
+        return Response({'error': 'date parameter is required (YYYY-MM-DD)'}, status=400)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+    day_of_week = target_date.weekday()
+    availability = PropertyAvailability.objects.filter(
+        property=property_obj, day_of_week=day_of_week, is_active=True
+    )
+
+    booked_times = set(
+        VisitBooking.objects.filter(
+            property=property_obj, visit_date=target_date, status__in=['pending', 'confirmed']
+        ).values_list('visit_time', flat=True)
+    )
+
+    slots = []
+    for avail in availability:
+        current = datetime.combine(target_date, avail.start_time)
+        end = datetime.combine(target_date, avail.end_time)
+        while current + timedelta(minutes=avail.slot_duration_minutes) <= end:
+            slot_time = current.time()
+            if slot_time not in booked_times:
+                slots.append({
+                    'time': slot_time.strftime('%H:%M'),
+                    'available': True,
+                })
+            current += timedelta(minutes=avail.slot_duration_minutes)
+
+    return Response({
+        'property': property_obj.name,
+        'date': date_str,
+        'slots': slots,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def public_book_visit(request, slug):
+    """Create a visit booking for a property (public)."""
+    property_obj = get_object_or_404(Property, public_slug=slug, is_published=True)
+    serializer = PublicBookingCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    data = serializer.validated_data
+    visit_date = data['visit_date']
+    visit_time = data['visit_time']
+
+    day_of_week = visit_date.weekday()
+    availability = PropertyAvailability.objects.filter(
+        property=property_obj, day_of_week=day_of_week, is_active=True,
+        start_time__lte=visit_time, end_time__gt=visit_time
+    ).first()
+
+    exists = VisitBooking.objects.filter(
+        property=property_obj, visit_date=visit_date, visit_time=visit_time,
+        status__in=['pending', 'confirmed']
+    ).exists()
+    if exists:
+        return Response({'error': 'This time slot is already booked.'}, status=400)
+
+    booking = VisitBooking.objects.create(
+        property=property_obj,
+        availability=availability,
+        guest_name=data['guest_name'],
+        guest_email=data['guest_email'],
+        guest_phone=data.get('guest_phone', ''),
+        visit_date=visit_date,
+        visit_time=visit_time,
+        notes=data.get('notes', ''),
+        whatsapp_enabled=data.get('whatsapp_enabled', False),
+    )
+
+    notify(
+        recipient=property_obj.owner,
+        type='visit_booked',
+        title=f'New Visit Booking — {booking.guest_name}',
+        message=f'{booking.guest_name} has booked a visit to {property_obj.name} on {visit_date} at {visit_time}.',
+        link='/dashboard/bookings',
+        send_email_flag=True,
+        email_subject=f'New Visit Booking — {property_obj.name}',
+        email_body=(
+            f'<p>Hello,</p>'
+            f'<p>A new visit has been booked for your property <strong>{property_obj.name}</strong>.</p>'
+            f'<p><strong>Guest:</strong> {booking.guest_name}</p>'
+            f'<p><strong>Email:</strong> {booking.guest_email}</p>'
+            f'<p><strong>Phone:</strong> {booking.guest_phone or "Not provided"}</p>'
+            f'<p><strong>Date:</strong> {visit_date}</p>'
+            f'<p><strong>Time:</strong> {visit_time}</p>'
+            f'<p>Please confirm or cancel this booking from your dashboard.</p>'
+        ),
+    )
+
+    return Response(VisitBookingSerializer(booking).data, status=201)

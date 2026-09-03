@@ -419,6 +419,9 @@ class Notification(models.Model):
         ('document_verified', 'Document Verified'),
         ('document_rejected', 'Document Rejected'),
         ('purchase_interest', 'Purchase Interest'),
+        ('visit_booked', 'Visit Booked'),
+        ('visit_confirmed', 'Visit Confirmed'),
+        ('visit_cancelled', 'Visit Cancelled'),
     ]
 
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -434,3 +437,75 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"[{self.type}] {self.title}"
+
+
+# ── Visit Booking ──────────────────────────────────────────────────────────
+
+class PropertyAvailability(models.Model):
+    """Agent-defined available time windows for property visits."""
+
+    DAY_CHOICES = [
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='availability_slots')
+    day_of_week = models.IntegerField(choices=DAY_CHOICES)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    slot_duration_minutes = models.PositiveIntegerField(default=30)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['day_of_week', 'start_time']
+        unique_together = ['property', 'day_of_week', 'start_time']
+
+    def __str__(self):
+        return f"{self.property.name} - {self.get_day_of_week_display()} {self.start_time}-{self.end_time}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.start_time >= self.end_time:
+            raise ValidationError('End time must be after start time.')
+        if self.slot_duration_minutes < 15:
+            raise ValidationError('Slot duration must be at least 15 minutes.')
+
+
+class VisitBooking(models.Model):
+    """A guest's booked visit to a property."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='visit_bookings')
+    availability = models.ForeignKey(
+        PropertyAvailability, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='bookings'
+    )
+    guest_name = models.CharField(max_length=200)
+    guest_email = models.EmailField()
+    guest_phone = models.CharField(max_length=30, blank=True, default='')
+    visit_date = models.DateField()
+    visit_time = models.TimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True, default='')
+    whatsapp_enabled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.guest_name} → {self.property.name} on {self.visit_date} {self.visit_time}"
