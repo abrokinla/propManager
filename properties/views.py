@@ -1723,3 +1723,63 @@ def property_analytics_detail(request, pk):
         'referrers': list(referrer_breakdown),
         'views_over_time': list(views_over_time),
     })
+
+
+# ── AI Generation ─────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ai_generate_description(request):
+    """Generate a property listing description using AI."""
+    property_id = request.data.get('property_id')
+    if not property_id:
+        return Response({'error': 'property_id is required'}, status=400)
+
+    property_obj = get_object_or_404(Property, pk=property_id, owner=request.user)
+    units = Unit.objects.filter(property=property_obj)
+
+    property_data = {
+        'name': property_obj.name,
+        'property_type': property_obj.property_type,
+        'address': property_obj.address,
+        'description': property_obj.description,
+        'total_units': property_obj.total_units,
+        'amenities': property_obj.amenities,
+        'nearby_places': property_obj.nearby_places,
+        'units': list(units.values('unit_number', 'bedrooms', 'bathrooms', 'toilets', 'size_sqft', 'price_rent', 'rent_cycle')),
+    }
+
+    from .services.ai_service import generate_property_description
+    description = generate_property_description(property_data)
+    if not description:
+        return Response({'error': 'AI generation failed. Please try again.'}, status=502)
+
+    return Response({'description': description})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ai_generate_social_posts(request):
+    """Generate social media posts for a property using AI."""
+    property_id = request.data.get('property_id')
+    platform = request.data.get('platform', 'all')
+    if not property_id:
+        return Response({'error': 'property_id is required'}, status=400)
+
+    property_obj = get_object_or_404(Property, pk=property_id, owner=request.user)
+    units = Unit.objects.filter(property=property_obj)
+
+    property_data = {
+        'name': property_obj.name,
+        'property_type': property_obj.property_type,
+        'address': property_obj.address,
+        'amenities': property_obj.amenities,
+        'units': list(units.values('unit_number', 'bedrooms', 'price_rent', 'rent_cycle')),
+    }
+
+    from .services.ai_service import generate_social_posts
+    posts = generate_social_posts(property_data, platform=platform)
+    if not posts:
+        return Response({'error': 'AI generation failed. Please try again.'}, status=502)
+
+    return Response({'posts': posts})
