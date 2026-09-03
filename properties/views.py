@@ -150,6 +150,8 @@ def dashboard_stats(request):
         unit__property__owner=request.user
     ).exclude(status='Completed').count()
 
+    properties_with_slugs = list(Property.objects.filter(owner=request.user).values('id', 'name', 'public_slug'))
+
     profile = request.user.profile
     return Response({
         'public_slug': profile.public_slug,
@@ -162,6 +164,7 @@ def dashboard_stats(request):
         'upcoming_lease_expirations': upcoming_list,
         'recent_payments': payments_list,
         'open_maintenance': open_maintenance,
+        'properties_with_slugs': properties_with_slugs,
     })
 
 
@@ -213,6 +216,14 @@ def public_agent_properties(request, slug):
 @permission_classes([AllowAny])
 def public_property_detail(request, pk):
     prop = get_object_or_404(Property, pk=pk, is_published=True)
+    serializer = PublicPropertyDetailSerializer(prop)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_property_detail_by_slug(request, slug):
+    prop = get_object_or_404(Property, public_slug=slug, is_published=True)
     serializer = PublicPropertyDetailSerializer(prop)
     return Response(serializer.data)
 

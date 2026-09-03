@@ -61,8 +61,14 @@ class Property(models.Model):
     amenities = models.TextField(blank=True, default='')
     nearby_places = models.TextField(blank=True, default='')
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
+    public_slug = models.CharField(max_length=12, unique=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if not self.public_slug:
+            self.public_slug = uuid.uuid4().hex[:12]
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name

@@ -78,7 +78,7 @@ class PublicPropertyListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'description',
+        fields = ['id', 'public_slug', 'name', 'address', 'property_type', 'description',
                   'image_url', 'total_units', 'amenities', 'nearby_places',
                   'available_units_count', 'price_range']
 
@@ -100,7 +100,7 @@ class PublicPropertyDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Property
-        fields = ['id', 'name', 'address', 'property_type', 'description',
+        fields = ['id', 'public_slug', 'name', 'address', 'property_type', 'description',
                   'image_url', 'total_units', 'amenities', 'nearby_places',
                   'available_units_count', 'price_range', 'available_units']
 
