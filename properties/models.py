@@ -509,3 +509,29 @@ class VisitBooking(models.Model):
 
     def __str__(self):
         return f"{self.guest_name} → {self.property.name} on {self.visit_date} {self.visit_time}"
+
+
+# ── Analytics ─────────────────────────────────────────────────────────────
+
+class PropertyView(models.Model):
+    """Tracks individual page views on public property listings."""
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='views')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default='')
+    referrer = models.URLField(max_length=500, blank=True, default='')
+    utm_source = models.CharField(max_length=100, blank=True, default='')
+    utm_medium = models.CharField(max_length=100, blank=True, default='')
+    utm_campaign = models.CharField(max_length=100, blank=True, default='')
+    page_path = models.CharField(max_length=500, blank=True, default='')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+        indexes = [
+            models.Index(fields=['property', 'viewed_at']),
+            models.Index(fields=['utm_source']),
+        ]
+
+    def __str__(self):
+        return f"View of {self.property.name} at {self.viewed_at}"

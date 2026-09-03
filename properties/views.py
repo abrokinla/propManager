@@ -12,7 +12,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta, date
 import logging
 logger = logging.getLogger(__name__)
-from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification, UserProfile, PropertyAvailability, VisitBooking
+from .models import Property, Unit, Tenant, Payment, MaintenanceRequest, TenancyDocument, QuitNotice, Reminder, TenancyAgreementTemplate, DEFAULT_TEMPLATE_DATA, Notification, UserProfile, PropertyAvailability, VisitBooking, PropertyView
 from .serializers import (
     PropertySerializer, PropertyListSerializer, UnitSerializer, UnitListSerializer,
     TenantSerializer, TenantListSerializer, PaymentSerializer, PaymentListSerializer,
@@ -1595,3 +1595,131 @@ def public_book_visit(request, slug):
     )
 
     return Response(VisitBookingSerializer(booking).data, status=201)
+
+
+# ── Analytics ─────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def track_property_view(request, slug):
+    """Record a page view for a property listing (public)."""
+    property_obj = get_object_or_404(Property, public_slug=slug, is_published=True)
+    ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR')
+    ua = request.META.get('HTTP_USER_AGENT', '')
+    referrer = request.META.get('HTTP_REFERER', '')
+    data = request.data if isinstance(request.data, dict) else {}
+
+    PropertyView.objects.create(
+        property=property_obj,
+        ip_address=ip or None,
+        user_agent=ua[:500],
+        referrer=referrer[:500] if referrer else data.get('referrer', '')[:500],
+        utm_source=data.get('utm_source', ''),
+        utm_medium=data.get('utm_medium', ''),
+        utm_campaign=data.get('utm_campaign', ''),
+        page_path=data.get('page_path', ''),
+    )
+    return Response({'status': 'ok'}, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def property_analytics_summary(request):
+    """Return analytics summary for all properties owned by the user."""
+    properties = Property.objects.filter(owner=request.user)
+    days = int(request.query_params.get('days', 30))
+    since = datetime.now() - timedelta(days=days)
+
+    # Total views per property
+    view_counts = (
+        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        .values('property__id', 'property__name')
+        .annotate(total_views=Count('id'))
+        .order_by('-total_views')
+    )
+
+    # Source breakdown (utm_source)
+    source_breakdown = (
+        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        .exclude(utm_source='')
+        .values('utm_source')
+        .annotate(count=Count('id'))
+        .order_by('-count')
+    )
+
+    # Referrer breakdown (top referrers)
+    referrer_breakdown = (
+        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        .exclude(referrer='')
+        .values('referrer')
+        .annotate(count=Count('id'))
+        .order_by('-count')[:10]
+    )
+
+    # Views over time (daily)
+    views_over_time = (
+        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        .extra(select={'date': "date(viewed_at)"})
+        .values('date')
+        .annotate(views=Count('id'))
+        .order_by('date')
+    )
+
+    total_views = sum(v['total_views'] for v in view_counts)
+
+    return Response({
+        'period_days': days,
+        'total_views': total_views,
+        'properties': list(view_counts),
+        'sources': list(source_breakdown),
+        'referrers': list(referrer_breakdown),
+        'views_over_time': list(views_over_time),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def property_analytics_detail(request, pk):
+    """Return analytics for a single property."""
+    property_obj = get_object_or_404(Property, pk=pk, owner=request.user)
+    days = int(request.query_params.get('days', 30))
+    since = datetime.now() - timedelta(days=days)
+
+    views_qs = PropertyView.objects.filter(property=property_obj, viewed_at__gte=since)
+
+    total_views = views_qs.count()
+
+    source_breakdown = (
+        views_qs.exclude(utm_source='')
+        .values('utm_source')
+        .annotate(count=Count('id'))
+        .order_by('-count')
+    )
+
+    referrer_breakdown = (
+        views_qs.exclude(referrer='')
+        .values('referrer')
+        .annotate(count=Count('id'))
+        .order_by('-count')[:10]
+    )
+
+    views_over_time = (
+        views_qs.extra(select={'date': "date(viewed_at)"})
+        .values('date')
+        .annotate(views=Count('id'))
+        .order_by('date')
+    )
+
+    # Top countries/cities from IP (placeholder — would need GeoIP in production)
+    unique_visitors = views_qs.values('ip_address').distinct().count()
+
+    return Response({
+        'property_id': property_obj.id,
+        'property_name': property_obj.name,
+        'period_days': days,
+        'total_views': total_views,
+        'unique_visitors': unique_visitors,
+        'sources': list(source_breakdown),
+        'referrers': list(referrer_breakdown),
+        'views_over_time': list(views_over_time),
+    })
