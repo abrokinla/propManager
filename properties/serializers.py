@@ -487,3 +487,10 @@ class PublicBookingCreateSerializer(serializers.Serializer):
     visit_time = serializers.TimeField()
     notes = serializers.CharField(required=False, allow_blank=True)
     whatsapp_enabled = serializers.BooleanField(default=False)
+
+
+class ExpressInterestSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200)
+    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    message = serializers.CharField(required=False, allow_blank=True)

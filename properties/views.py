@@ -27,6 +27,7 @@ from .serializers import (
     NotificationListSerializer, NotificationDetailSerializer,
     PropertyAvailabilitySerializer, PropertyAvailabilityListSerializer,
     VisitBookingSerializer, VisitBookingListSerializer, PublicBookingCreateSerializer,
+    ExpressInterestSerializer,
 )
 from .services.document_service import send_tenancy_document
 from .services.pdf_service import generate_tenancy_agreement
@@ -1595,6 +1596,38 @@ def public_book_visit(request, slug):
     )
 
     return Response(VisitBookingSerializer(booking).data, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def public_express_interest(request, slug):
+    """Allow an anonymous visitor to express interest in a property."""
+    property_obj = get_object_or_404(Property, public_slug=slug, is_published=True)
+
+    serializer = ExpressInterestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    notify(
+        recipient=property_obj.owner,
+        type='property_interest',
+        title=f'New Interest — {property_obj.name}',
+        message=f'{data["name"]} is interested in your property {property_obj.name}.',
+        link='/dashboard',
+        send_email_flag=True,
+        email_subject=f'New Interest in {property_obj.name}',
+        email_body=(
+            f'<p>Hello,</p>'
+            f'<p>A visitor has expressed interest in your property <strong>{property_obj.name}</strong>.</p>'
+            f'<p><strong>Name:</strong> {data["name"]}</p>'
+            f'<p><strong>Email:</strong> {data["email"]}</p>'
+            f'<p><strong>Phone:</strong> {data.get("phone") or "Not provided"}</p>'
+            + (f'<p><strong>Message:</strong> {data["message"]}</p>' if data.get('message') else '')
+            + f'<p>You can reach out to them directly to discuss leasing options.</p>'
+        ),
+    )
+
+    return Response({'status': 'interest_recorded'}, status=201)
 
 
 # ── Analytics ─────────────────────────────────────────────────────────────
