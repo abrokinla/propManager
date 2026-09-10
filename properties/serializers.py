@@ -46,7 +46,7 @@ class PropertySerializer(serializers.ModelSerializer):
         model = Property
         fields = ['id', 'name', 'address', 'property_type', 'description', 'total_units',
                   'image_url', 'is_published', 'amenities', 'nearby_places',
-                  'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
+                  'public_slug', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_units_count(self, obj):
