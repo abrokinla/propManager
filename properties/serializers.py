@@ -441,7 +441,7 @@ class PropertyAvailabilityListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PropertyAvailability
-        fields = ['id', 'day_of_week', 'day_display', 'start_time', 'end_time',
+        fields = ['id', 'property', 'day_of_week', 'day_display', 'start_time', 'end_time',
                   'slot_duration_minutes', 'is_active']
 
 
