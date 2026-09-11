@@ -428,20 +428,22 @@ class NotificationDetailSerializer(serializers.ModelSerializer):
 
 class PropertyAvailabilitySerializer(serializers.ModelSerializer):
     day_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+    property_name = serializers.CharField(source='property.name', read_only=True)
 
     class Meta:
         model = PropertyAvailability
-        fields = ['id', 'day_of_week', 'day_display', 'start_time', 'end_time',
+        fields = ['id', 'property', 'property_name', 'day_of_week', 'day_display', 'start_time', 'end_time',
                   'slot_duration_minutes', 'is_active', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 
 class PropertyAvailabilityListSerializer(serializers.ModelSerializer):
     day_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+    property_name = serializers.CharField(source='property.name', read_only=True)
 
     class Meta:
         model = PropertyAvailability
-        fields = ['id', 'property', 'day_of_week', 'day_display', 'start_time', 'end_time',
+        fields = ['id', 'property', 'property_name', 'day_of_week', 'day_display', 'start_time', 'end_time',
                   'slot_duration_minutes', 'is_active']
 
 
