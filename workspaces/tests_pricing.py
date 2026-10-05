@@ -9,7 +9,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from properties.models import Property
+from properties.models import Property, Tenant, Unit
 from workspaces.models import AgentKYC
 from workspaces.plans import PLANS, plans_for_track
 from workspaces.services.provisioning import add_member, provision_workspace
@@ -356,3 +356,81 @@ class RetiredAgentEndpointTests(TestCase):
         )
         response = client.get(f'/api/public/agents/{user.profile.agent_public_slug}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class PublicAgentPropertyListTests(TestCase):
+    """The agent page must serve the same payload shape as /public/properties/.
+
+    The agent listing page renders with the shared property card, so a thinner
+    agent-only payload would silently drop price_range and unit counts.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user, self.org, self.kyc = make_agent('agentlist')
+        self.post(decision='verified')
+        self.slug = self.user.profile.agent_public_slug
+
+    def post(self, decision, reason=''):
+        reviewer = User.objects.create_user(
+            username=f'reviewer{decision}', password='pass12345'
+        )
+        org = make_agent(f'rev{decision}')[1]
+        add_member(org, reviewer, 'owner')
+        self.client.force_authenticate(reviewer)
+        return self.client.post(
+            '/api/agent/kyc/review/',
+            {'agent_id': self.user.id, 'decision': decision, 'reason': reason},
+            format='json',
+        )
+
+    def url(self):
+        return f'/api/public/agents/{self.slug}/properties/'
+
+    def test_returns_public_list_serializer_shape(self):
+        prop = Property.objects.create(
+            name='Listed', address='Lagos', property_type='House',
+            organization=self.org, is_published=True, total_units=2,
+        )
+        Unit.objects.create(property=prop, unit_number='A1', price_rent='500000')
+
+        response = self.client.get(self.url())
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        row = payload[0]
+        self.assertEqual(row['public_slug'], prop.public_slug)
+        self.assertEqual(row['available_units_count'], 1)
+        self.assertEqual(row['price_range'], {'min': 500000.0, 'max': 500000.0})
+
+    def test_unpublished_and_fully_booked_are_hidden(self):
+        Property.objects.create(
+            name='Hidden', address='Lagos', property_type='House',
+            organization=self.org, is_published=False, total_units=1,
+        )
+        full = Property.objects.create(
+            name='Full', address='Abuja', property_type='House',
+            organization=self.org, is_published=True, total_units=1,
+        )
+        unit = Unit.objects.create(property=full, unit_number='B1', price_rent='100')
+        Tenant.objects.create(
+            name='Occupied',
+            email='occupied@example.com',
+            unit=unit,
+            is_active=True,
+        )
+
+        response = self.client.get(self.url())
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json(), [])
+
+    def test_unverified_agent_gets_404(self):
+        # provision_workspace already creates the AgentKYC row, not verified.
+        other, _, kyc = make_agent('unverified', verified=False)
+        self.assertNotEqual(kyc.status, 'verified')
+        slug = other.profile.agent_public_slug
+
+        self.assertEqual(
+            self.client.get(f'/api/public/agents/{slug}/properties/').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )

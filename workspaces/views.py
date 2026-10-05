@@ -4,7 +4,7 @@ KYC gating: ``pending`` agents get one property and no public profile;
 ``verified`` agents unlock the public profile at /agents/<slug> and the full
 CRM. Gating is enforced in helpers here rather than sprinkled through views.
 """
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, F, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as dj_timezone
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from properties.models import Property, PropertyView, VisitBooking
+from properties.serializers import PublicPropertyListSerializer
 from workspaces.models import AgentKYC, Organization
 from workspaces.scopes import accessible_properties, organizations_for
 from workspaces.serializers import AgentKYCSerializer, AgentProfileSerializer
@@ -248,19 +249,13 @@ class AgentPropertyListView(APIView):
         org = get_agent_org(kyc.user)
         if org is None:
             return Response({'detail': 'Agent not found.'}, status=404)
-        props = org.properties.filter(is_published=True)
-        return Response([
-            {
-                'id': p.id,
-                'name': p.name,
-                'address': p.address,
-                'property_type': p.property_type,
-                'image_url': p.image_url,
-                'price_rent': str(p.price_rent) if hasattr(p, 'price_rent') else None,
-                'public_slug': p.public_slug,
-            }
-            for p in props
-        ])
+        # Same serializer and same "has availability" rule as
+        # /api/public/properties/, so an agent's page renders with the identical
+        # card component instead of a thinner agent-only payload.
+        props = org.properties.filter(is_published=True).annotate(
+            active_count=Count('units__tenant', filter=Q(units__tenant__is_active=True))
+        ).filter(active_count__lt=F('total_units')).distinct()
+        return Response(PublicPropertyListSerializer(props, many=True).data)
 
 
 class AgentLeadsView(APIView):
