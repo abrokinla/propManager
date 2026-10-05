@@ -21,12 +21,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    track = serializers.ChoiceField(
+        choices=[('agent', 'Agent'), ('owner', 'Owner')],
+        default='owner',
+        required=False,
+        write_only=True,
+    )
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'first_name', 'last_name']
+        fields = ['username', 'email', 'password', 'first_name', 'last_name', 'track']
 
     def create(self, validated_data):
+        track = validated_data.pop('track', 'owner')
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email', ''),
@@ -34,6 +41,12 @@ class RegisterSerializer(serializers.ModelSerializer):
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
         )
+        # The post_save signal has already provisioned an 'owner' workspace by
+        # this point. Reconciling here is a no-op for owner signups and switches
+        # the track to 'agent' for agent signups.
+        from workspaces.services.provisioning import provision_workspace
+
+        provision_workspace(user, track=track)
         return user
 
 

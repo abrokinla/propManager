@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'cloudinary',
     'django_filters',
     'properties',
+    'workspaces',
 ]
 
 MIDDLEWARE = [

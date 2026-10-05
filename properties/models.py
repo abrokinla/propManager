@@ -17,12 +17,24 @@ class UserProfile(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     company_name = models.CharField(max_length=200, blank=True)
     public_slug = models.CharField(max_length=12, unique=True, null=True, blank=True)
+    agent_public_slug = models.CharField(
+        max_length=12, unique=True, null=True, blank=True
+    )
+    kyc = models.OneToOneField(
+        'workspaces.AgentKYC',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='profile',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
         if not self.public_slug:
             self.public_slug = uuid.uuid4().hex[:12]
+        if not self.agent_public_slug:
+            self.agent_public_slug = uuid.uuid4().hex[:12]
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -38,6 +50,20 @@ def create_user_profile(sender, instance, created, **kwargs):
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):
     instance.profile.save()
+
+
+@receiver(post_save, sender=User)
+def provision_user_workspace(sender, instance, created, **kwargs):
+    """Give every new user a personal workspace.
+
+    ``created``-guarded on purpose: the receiver above fires on every save, and
+    provisioning must not run again on admin or shell updates.
+    """
+    if not created:
+        return
+    from workspaces.services.provisioning import provision_workspace
+
+    provision_workspace(instance)
 
 
 class Property(models.Model):
@@ -60,7 +86,23 @@ class Property(models.Model):
     is_published = models.BooleanField(default=False)
     amenities = models.TextField(blank=True, default='')
     nearby_places = models.TextField(blank=True, default='')
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties')
+    # Denormalized mirror of the owning organization's owner membership. The
+    # real lifecycle is governed by Organization (CASCADE); a deleted user must
+    # not destroy properties that still belong to a live organization.
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='properties',
+    )
+    organization = models.ForeignKey(
+        'workspaces.Organization',
+        on_delete=models.CASCADE,
+        related_name='properties',
+        null=True,
+        blank=True,
+    )
     public_slug = models.CharField(max_length=12, unique=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -68,6 +110,14 @@ class Property(models.Model):
     def save(self, *args, **kwargs):
         if not self.public_slug:
             self.public_slug = uuid.uuid4().hex[:12]
+        if self.organization_id and not self.owner_id:
+            owner_membership = (
+                self.organization.memberships.filter(role='owner')
+                .select_related('user')
+                .first()
+            )
+            if owner_membership:
+                self.owner_id = owner_membership.user_id
         super().save(*args, **kwargs)
 
     def __str__(self):
