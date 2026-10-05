@@ -37,6 +37,8 @@ from .services.storage_service import upload_file_bytes
 from .services.invitation_service import send_invitation, resend_invitation
 from .services.notification_service import notify
 from .utils import generate_unit_prefix
+from workspaces.scopes import accessible_properties, accessible_properties_query
+from workspaces.services.provisioning import get_organization
 
 
 def deep_merge(base, override):
@@ -111,20 +113,26 @@ def profile_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
-    total_properties = Property.objects.filter(owner=request.user).count()
-    total_units = Unit.objects.filter(property__owner=request.user).count()
-    total_capacity = Property.objects.filter(owner=request.user).aggregate(total=Sum('total_units'))['total'] or 0
-    active_tenants = Tenant.objects.filter(unit__property__owner=request.user, is_active=True).count()
+    props = accessible_properties(request.user)
+    total_properties = props.count()
+    total_units = Unit.objects.filter(
+        accessible_properties_query(request.user, prefix='property__')
+    ).count()
+    total_capacity = props.aggregate(total=Sum('total_units'))['total'] or 0
+    active_tenants = Tenant.objects.filter(
+        accessible_properties_query(request.user, prefix='unit__property__'),
+        is_active=True,
+    ).count()
     occupancy_rate = (active_tenants / total_capacity * 100) if total_capacity > 0 else 0
 
     total_revenue = Payment.objects.filter(
-        tenant__unit__property__owner=request.user,
+        accessible_properties_query(request.user, prefix='tenant__unit__property__'),
         payment_date__gte=datetime.now().date() - timedelta(days=365),
     ).aggregate(total=Sum('amount'))['total'] or 0
 
     thirty_days_later = datetime.now().date() + timedelta(days=30)
     upcoming_expirations = Tenant.objects.filter(
-        unit__property__owner=request.user,
+        accessible_properties_query(request.user, prefix='unit__property__'),
         lease_expiry_date__lte=thirty_days_later,
         lease_expiry_date__gte=datetime.now().date(),
         is_active=True
@@ -138,7 +146,7 @@ def dashboard_stats(request):
     } for t in upcoming_expirations]
 
     recent_payments = Payment.objects.filter(
-        tenant__unit__property__owner=request.user
+        accessible_properties_query(request.user, prefix='tenant__unit__property__')
     ).order_by('-payment_date')[:5]
 
     payments_list = [{
@@ -150,10 +158,10 @@ def dashboard_stats(request):
     } for p in recent_payments]
 
     open_maintenance = MaintenanceRequest.objects.filter(
-        unit__property__owner=request.user
+        accessible_properties_query(request.user, prefix='unit__property__')
     ).exclude(status='Completed').count()
 
-    properties_with_slugs = list(Property.objects.filter(owner=request.user).values('id', 'name', 'public_slug'))
+    properties_with_slugs = list(props.values('id', 'name', 'public_slug'))
 
     profile = request.user.profile
     return Response({
@@ -238,7 +246,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return Property.objects.filter(owner=self.request.user)
+        return accessible_properties(self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -246,7 +254,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
         return PropertySerializer
 
     def perform_create(self, serializer):
-        prop = serializer.save(owner=self.request.user)
+        # owner is left unset on purpose: Property.save() mirrors the
+        # organization's owner membership into it. Passing the creator would
+        # break that invariant for shared workspaces.
+        prop = serializer.save(organization=get_organization(self.request.user))
         prefix = generate_unit_prefix(prop.name)
         existing_count = Unit.objects.filter(property=prop).count()
         units = []
@@ -274,7 +285,9 @@ class UnitViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return Unit.objects.filter(property__owner=self.request.user)
+        return Unit.objects.filter(
+            accessible_properties_query(self.request.user, prefix='property__')
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -283,9 +296,8 @@ class UnitViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         property_id = serializer.validated_data.get('property_id')
-        try:
-            prop = Property.objects.get(id=property_id, owner=self.request.user)
-        except Property.DoesNotExist:
+        prop = accessible_properties(self.request.user).filter(id=property_id).first()
+        if prop is None:
             raise serializers.ValidationError({'property_id': 'Property not found or not owned by you.'})
         serializer.save(property=prop)
 
@@ -316,9 +328,9 @@ class TenantViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return Tenant.objects.filter(unit__property__owner=self.request.user).select_related(
-            'unit', 'unit__property'
-        )
+        return Tenant.objects.filter(
+            accessible_properties_query(self.request.user, prefix='unit__property__')
+        ).select_related('unit', 'unit__property')
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -327,9 +339,13 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         unit = serializer.validated_data.get('unit_id')
-        try:
-            unit_obj = Unit.objects.select_related('property').get(id=unit)
-        except Unit.DoesNotExist:
+        unit_obj = (
+            Unit.objects.filter(accessible_properties_query(self.request.user, prefix='property__'))
+            .filter(id=unit)
+            .select_related('property')
+            .first()
+        )
+        if unit_obj is None:
             raise serializers.ValidationError({'unit_id': 'Unit not found.'})
         property_obj = unit_obj.property
         active_count = Tenant.objects.filter(unit__property=property_obj, is_active=True).count()
@@ -548,7 +564,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
     ordering = ['-payment_date']
 
     def get_queryset(self):
-        return Payment.objects.filter(tenant__unit__property__owner=self.request.user)
+        return Payment.objects.filter(
+            accessible_properties_query(
+                self.request.user, prefix='tenant__unit__property__'
+            )
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -660,13 +680,14 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
     serializer_class = TenancyAgreementTemplateSerializer
 
     def get_queryset(self):
-        return TenancyAgreementTemplate.objects.filter(property__owner=self.request.user)
+        return TenancyAgreementTemplate.objects.filter(
+            accessible_properties_query(self.request.user, prefix='property__')
+        )
 
     def perform_create(self, serializer):
         property_id = serializer.validated_data.get('property_id')
-        try:
-            prop = Property.objects.get(id=property_id, owner=self.request.user)
-        except Property.DoesNotExist:
+        prop = accessible_properties(self.request.user).filter(id=property_id).first()
+        if prop is None:
             raise serializers.ValidationError({'property_id': 'Property not found or not owned by you.'})
         template_data = serializer.validated_data.get('template_data', {})
         merged = deep_merge(DEFAULT_TEMPLATE_DATA, template_data)
@@ -722,7 +743,9 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return MaintenanceRequest.objects.filter(unit__property__owner=self.request.user)
+        return MaintenanceRequest.objects.filter(
+            accessible_properties_query(self.request.user, prefix='unit__property__')
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -1240,8 +1263,8 @@ def tenant_agreement(request):
 @permission_classes([IsAuthenticated])
 def pending_verifications(request):
     docs = TenancyDocument.objects.filter(
+        accessible_properties_query(request.user, prefix='tenant__unit__property__'),
         status='pending_verification',
-        tenant__unit__property__owner=request.user,
     ).select_related('tenant', 'tenant__unit', 'tenant__unit__property')
     return Response([{
         'tenant_id': d.tenant_id,
@@ -1402,7 +1425,7 @@ class PropertyAvailabilityViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return PropertyAvailability.objects.filter(
-            property__owner=self.request.user
+            accessible_properties_query(self.request.user, prefix='property__')
         ).select_related('property')
 
     def get_serializer_class(self):
@@ -1411,7 +1434,10 @@ class PropertyAvailabilityViewSet(viewsets.ModelViewSet):
         return PropertyAvailabilitySerializer
 
     def perform_create(self, serializer):
-        property_obj = get_object_or_404(Property, pk=self.request.data.get('property'), owner=self.request.user)
+        property_obj = get_object_or_404(
+            accessible_properties(self.request.user),
+            pk=self.request.data.get('property'),
+        )
         serializer.save(property=property_obj)
 
 
@@ -1420,7 +1446,7 @@ class VisitBookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return VisitBooking.objects.filter(
-            property__owner=self.request.user
+            accessible_properties_query(self.request.user, prefix='property__')
         ).select_related('property', 'availability')
 
     def get_serializer_class(self):
@@ -1659,13 +1685,16 @@ def track_property_view(request, slug):
 @permission_classes([IsAuthenticated])
 def property_analytics_summary(request):
     """Return analytics summary for all properties owned by the user."""
-    properties = Property.objects.filter(owner=request.user)
+    properties = accessible_properties(request.user)
     days = int(request.query_params.get('days', 30))
     since = datetime.now() - timedelta(days=days)
 
     # Total views per property
     view_counts = (
-        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        PropertyView.objects.filter(
+            accessible_properties_query(request.user, prefix='property__'),
+            viewed_at__gte=since,
+        )
         .values('property__id', 'property__name')
         .annotate(total_views=Count('id'))
         .order_by('-total_views')
@@ -1673,7 +1702,10 @@ def property_analytics_summary(request):
 
     # Source breakdown (utm_source)
     source_breakdown = (
-        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        PropertyView.objects.filter(
+            accessible_properties_query(request.user, prefix='property__'),
+            viewed_at__gte=since,
+        )
         .exclude(utm_source='')
         .values('utm_source')
         .annotate(count=Count('id'))
@@ -1682,7 +1714,10 @@ def property_analytics_summary(request):
 
     # Referrer breakdown (top referrers)
     referrer_breakdown = (
-        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        PropertyView.objects.filter(
+            accessible_properties_query(request.user, prefix='property__'),
+            viewed_at__gte=since,
+        )
         .exclude(referrer='')
         .values('referrer')
         .annotate(count=Count('id'))
@@ -1691,7 +1726,10 @@ def property_analytics_summary(request):
 
     # Views over time (daily)
     views_over_time = (
-        PropertyView.objects.filter(property__owner=request.user, viewed_at__gte=since)
+        PropertyView.objects.filter(
+            accessible_properties_query(request.user, prefix='property__'),
+            viewed_at__gte=since,
+        )
         .extra(select={'date': "date(viewed_at)"})
         .values('date')
         .annotate(views=Count('id'))
@@ -1714,7 +1752,7 @@ def property_analytics_summary(request):
 @permission_classes([IsAuthenticated])
 def property_analytics_detail(request, pk):
     """Return analytics for a single property."""
-    property_obj = get_object_or_404(Property, pk=pk, owner=request.user)
+    property_obj = get_object_or_404(accessible_properties(request.user), pk=pk)
     days = int(request.query_params.get('days', 30))
     since = datetime.now() - timedelta(days=days)
 
@@ -1768,7 +1806,9 @@ def ai_generate_description(request):
     if not property_id:
         return Response({'error': 'property_id is required'}, status=400)
 
-    property_obj = get_object_or_404(Property, pk=property_id, owner=request.user)
+    property_obj = get_object_or_404(
+        accessible_properties(request.user), pk=property_id
+    )
     units = Unit.objects.filter(property=property_obj)
 
     property_data = {
@@ -1799,7 +1839,9 @@ def ai_generate_social_posts(request):
     if not property_id:
         return Response({'error': 'property_id is required'}, status=400)
 
-    property_obj = get_object_or_404(Property, pk=property_id, owner=request.user)
+    property_obj = get_object_or_404(
+        accessible_properties(request.user), pk=property_id
+    )
     units = Unit.objects.filter(property=property_obj)
 
     property_data = {

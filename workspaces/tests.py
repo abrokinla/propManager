@@ -278,3 +278,85 @@ class ScopeTests(TestCase):
             property=self.prop2, user=self.client_user, role='viewer'
         )
         self.assertTrue(can_access_property(self.client_user, self.prop2))
+
+
+class UnlinkedPropertyTests(TestCase):
+    """Legacy rows with no organization must stay reachable during Phase 2."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='orphanuser', password='pass12345')
+        self.other = User.objects.create_user(username='orphanother', password='pass12345')
+        self.org = Organization.objects.get(memberships__user=self.user)
+        self.linked = Property.objects.create(
+            name='Linked', address='A', property_type='Apartment', organization=self.org
+        )
+        self.orphan = Property.objects.create(
+            name='Orphan', address='A', property_type='House', owner=self.user
+        )
+        self.other_orphan = Property.objects.create(
+            name='Other Orphan', address='A', property_type='House', owner=self.other
+        )
+
+    def test_orphan_visible_to_its_owner(self):
+        from workspaces.scopes import accessible_properties
+
+        names = set(accessible_properties(self.user).values_list('name', flat=True))
+        self.assertEqual(names, {'Linked', 'Orphan'})
+
+    def test_other_users_orphan_hidden(self):
+        from workspaces.scopes import accessible_properties
+
+        names = set(
+            accessible_properties(self.other).values_list('name', flat=True)
+        )
+        self.assertNotIn('Orphan', names)
+
+    def test_can_access_orphan_only_for_owner(self):
+        from workspaces.scopes import can_access_property
+
+        self.assertTrue(can_access_property(self.user, self.orphan))
+        self.assertFalse(can_access_property(self.other, self.orphan))
+
+    def test_query_helper_matches_helper(self):
+        from workspaces.scopes import accessible_properties, accessible_properties_query
+
+        via_q = Property.objects.filter(
+            accessible_properties_query(self.user)
+        ).values_list('name', flat=True)
+        self.assertEqual(set(via_q), set(accessible_properties(self.user).values_list('name', flat=True)))
+
+    def test_query_helper_with_prefix(self):
+        from properties.models import Unit
+        from workspaces.scopes import accessible_properties_query
+
+        Unit.objects.create(property=self.linked, unit_number='A1')
+        Unit.objects.create(property=self.orphan, unit_number='A2')
+        Unit.objects.create(property=self.other_orphan, unit_number='A3')
+        numbers = set(
+            Unit.objects.filter(accessible_properties_query(self.user, prefix='property__'))
+            .values_list('unit_number', flat=True)
+        )
+        self.assertEqual(numbers, {'A1', 'A2'})
+
+    def test_query_helper_deep_prefix(self):
+        from properties.models import Payment, Tenant, Unit
+        from workspaces.scopes import accessible_properties_query
+
+        unit = Unit.objects.create(property=self.linked, unit_number='B1')
+        tenant = Tenant.objects.create(
+            unit=unit, name='Tenant A', annual_rent=100,
+        )
+        Payment.objects.create(
+            tenant=tenant, amount=100, payment_date='2026-01-05',
+            payment_method='Cash',
+        )
+        payments = Payment.objects.filter(
+            accessible_properties_query(self.user, prefix='tenant__unit__property__')
+        )
+        self.assertEqual(payments.count(), 1)
+        self.assertEqual(
+            Payment.objects.filter(
+                accessible_properties_query(self.other, prefix='tenant__unit__property__')
+            ).count(),
+            0,
+        )
