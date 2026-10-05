@@ -5,9 +5,10 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from workspaces.pricing import PricingView
 from workspaces.views import (
-    AgentKYCView, AgentLeadsView, AgentProfileView, AgentPublicProfileView,
-    AgentPropertyListView, AgentStatsView,
+    AgentKYCView, AgentKYCReviewView, AgentLeadsView, AgentProfileView,
+    AgentPublicProfileView, AgentPropertyListView, AgentStatsView,
 )
 from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
@@ -18,7 +19,7 @@ from properties.views import (
     health_check, public_document_detail, public_document_sign,
     public_document_download_signed, public_document_download_unsigned,
     upload_image,
-    public_properties_list, public_property_detail, public_property_detail_by_slug, public_agent_properties,
+    public_properties_list, public_property_detail, public_property_detail_by_slug,
     public_property_available_slots, public_book_visit, public_express_interest, track_property_view,
     property_analytics_summary, property_analytics_detail,
     ai_generate_description, ai_generate_social_posts,
@@ -62,12 +63,14 @@ urlpatterns = [
     path('api/public/properties/', public_properties_list, name='public-properties-list'),
     path('api/public/properties/<int:pk>/', public_property_detail, name='public-property-detail'),
     path('api/public/properties/slug/<slug:slug>/', public_property_detail_by_slug, name='public-property-detail-by-slug'),
-    path('api/public/properties/agent/<slug:slug>/', public_agent_properties, name='public-agent-properties'),
+    
     path('api/public/properties/slug/<slug:slug>/slots/', public_property_available_slots, name='public-available-slots'),
     path('api/public/properties/slug/<slug:slug>/book/', public_book_visit, name='public-book-visit'),
     path('api/public/properties/slug/<slug:slug>/express-interest/', public_express_interest, name='public-express-interest'),
     path('api/public/properties/slug/<slug:slug>/view/', track_property_view, name='track-property-view'),
+    path('api/pricing/', PricingView.as_view(), name='pricing'),
     path('api/agent/profile/', AgentProfileView.as_view(), name='agent-profile'),
+    path('api/agent/kyc/review/', AgentKYCReviewView.as_view(), name='agent-kyc-review'),
     path('api/agent/kyc/submit/', AgentKYCView.as_view(), name='agent-kyc-submit'),
     path('api/agent/leads/', AgentLeadsView.as_view(), name='agent-leads'),
     path('api/agent/stats/', AgentStatsView.as_view(), name='agent-stats'),

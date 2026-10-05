@@ -168,9 +168,18 @@ def dashboard_stats(request):
     properties_with_slugs = list(props.values('id', 'name', 'public_slug'))
 
     profile = request.user.profile
+    from workspaces.views import get_agent_org, kyc_status
+
+    agent_org = get_agent_org(request.user)
     return Response({
         'public_slug': profile.public_slug,
+        # Separate namespace from public_slug. The agent profile endpoints and
+        # the KYC-gated public pages resolve on this one, so surfacing it here
+        # stops the dashboard building a share link off the wrong slug.
+        'agent_public_slug': profile.agent_public_slug,
         'company_name': profile.company_name,
+        'track': agent_org.track if agent_org else 'owner',
+        'kyc_status': kyc_status(request.user),
         'total_properties': total_properties,
         'total_units': total_units,
         'occupied_units': active_tenants,
@@ -207,24 +216,6 @@ def public_properties_list(request):
     ).filter(active_count__lt=F('total_units')).distinct()
     serializer = PublicPropertyListSerializer(props, many=True)
     return Response(serializer.data)
-
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def public_agent_properties(request, slug):
-    profile = get_object_or_404(UserProfile, public_slug=slug)
-    props = Property.objects.filter(
-        owner=profile.user, is_published=True
-    ).annotate(
-        active_count=Count('units__tenant', filter=Q(units__tenant__is_active=True))
-    ).filter(active_count__lt=F('total_units')).distinct()
-    serializer = PublicPropertyListSerializer(props, many=True)
-    return Response({
-        'agent': {
-            'company_name': profile.company_name or profile.user.get_full_name() or profile.user.username,
-        },
-        'properties': serializer.data,
-    })
 
 
 @api_view(['GET'])

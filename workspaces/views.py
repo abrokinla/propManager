@@ -19,9 +19,37 @@ from workspaces.serializers import AgentKYCSerializer, AgentProfileSerializer
 PENDING_PROPERTY_LIMIT = 1
 
 
-def get_agent_org(user):
-    """The user's agent-track organization, or None."""
-    return organizations_for(user).filter(track='agent').first()
+def get_agent_org(user, org_id=None):
+    """The agent-track organization to act on, or None.
+
+    ``org_id`` resolves an explicit workspace. Without one this falls back to
+    the caller's *oldest* agent organization, matching
+    scopes.organization_for(). Ordering matters: a user can belong to several
+    agent workspaces (their own plus a team they joined), and Organization.Meta
+    orders by -created_at, so picking the newest silently returned the team
+    member's personal workspace instead of the team.
+    """
+    orgs = organizations_for(user).filter(track='agent')
+    if org_id:
+        orgs = orgs.filter(id=org_id)
+        return orgs.first()
+    return orgs.order_by('created_at').first()
+
+
+def agent_orgs_where(user, roles=('owner', 'admin'), org_kind=None):
+    """Agent organizations where the user holds one of ``roles``.
+
+    ``org_kind`` narrows further; ``'team'`` skips personal workspaces.
+    """
+    orgs = Organization.objects.filter(
+        track='agent',
+        memberships__user=user,
+        memberships__role__in=roles,
+        memberships__accepted_at__isnull=False,
+    ).distinct()
+    if org_kind:
+        orgs = orgs.filter(kind=org_kind)
+    return orgs
 
 
 def kyc_status(user):
@@ -46,6 +74,82 @@ def is_verified(user):
 
 def public_agent_slug(user):
     return user.profile.agent_public_slug
+
+
+class AgentKYCReviewView(APIView):
+    """Approve or reject a pending KYC. Owner/admin on the reviewing org only.
+
+    Without an endpoint like this, AgentKYC.status could never leave
+    'unsubmitted' or 'pending', so no agent could ever reach their public
+    profile.
+
+    Scoped to accepted members of the reviewing organization, which is what
+    makes self-verification impossible: the applicant cannot be the reviewer.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        agent_id = request.data.get('agent_id')
+        if not agent_id:
+            return Response({'detail': 'agent_id is required.'}, status=400)
+        if str(agent_id) == str(request.user.id):
+            return Response(
+                {'detail': 'You cannot review your own KYC.'}, status=400
+            )
+
+        decision = request.data.get('decision')
+        if decision not in ('verified', 'rejected'):
+            return Response(
+                {'detail': "decision must be 'verified' or 'rejected'."},
+                status=400,
+            )
+
+        reason = (request.data.get('reason') or '').strip()
+        if decision == 'rejected' and not reason:
+            return Response(
+                {'detail': 'A reason is required when rejecting.'}, status=400
+            )
+
+        # The workspace must connect reviewer and applicant: caller holds
+        # owner/admin there and the applicant is an accepted member. Resolved by
+        # intersecting membership rows rather than guessing a single "my org",
+        # so a caller in several agent workspaces cannot review outside the one
+        # they administer.
+        org = (
+            agent_orgs_where(request.user, roles=('owner', 'admin'))
+            .filter(memberships__user_id=agent_id,
+                    memberships__accepted_at__isnull=False)
+            .first()
+        )
+        if org is None:
+            # Distinguish "not an admin" from "not in your workspace". A personal
+            # workspace never grants review authority: its only other member
+            # would be yourself, which is refused above. So the test is whether
+            # the caller administers a team workspace at all.
+            if not agent_orgs_where(request.user, org_kind='team').exists():
+                return Response(
+                    {'detail': 'Only an organization owner or admin can review KYC.'},
+                    status=403,
+                )
+            return Response(
+                {'detail': 'That user is not a member of a workspace you administer.'},
+                status=404,
+            )
+
+        kyc, _ = AgentKYC.objects.get_or_create(user_id=agent_id)
+        if kyc.status != 'pending':
+            return Response(
+                {'detail': f'This KYC is {kyc.status}, not pending.'}, status=400
+            )
+
+        kyc.status = decision
+        kyc.rejection_reason = reason if decision == 'rejected' else ''
+        kyc.reviewed_by = request.user
+        kyc.reviewed_at = dj_timezone.now()
+        kyc.save()
+
+        return Response(AgentKYCSerializer(kyc).data)
 
 
 class AgentProfileView(APIView):
