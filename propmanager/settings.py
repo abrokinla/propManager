@@ -119,6 +119,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
         'django_filters.rest_framework.DjangoFilterBackend',
     ),
+    'EXCEPTION_HANDLER': 'workspaces.handlers.plan_exception_handler',
 }
 
 # Simple JWT
