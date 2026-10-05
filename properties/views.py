@@ -37,8 +37,12 @@ from .services.storage_service import upload_file_bytes
 from .services.invitation_service import send_invitation, resend_invitation
 from .services.notification_service import notify
 from .utils import generate_unit_prefix
+from workspaces.permissions import (
+    CanWriteWorkspace,
+    IsWorkspaceMember,
+    target_organization,
+)
 from workspaces.scopes import accessible_properties, accessible_properties_query
-from workspaces.services.provisioning import get_organization
 
 
 def deep_merge(base, override):
@@ -240,6 +244,7 @@ def public_property_detail_by_slug(request, slug):
 
 
 class PropertyViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'address', 'property_type', 'description']
     ordering_fields = ['name', 'created_at', 'property_type', 'total_units']
@@ -257,7 +262,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
         # owner is left unset on purpose: Property.save() mirrors the
         # organization's owner membership into it. Passing the creator would
         # break that invariant for shared workspaces.
-        prop = serializer.save(organization=get_organization(self.request.user))
+        #
+        # organization_id may be supplied to file the property under a specific
+        # workspace. CanWriteWorkspace has already checked the caller's role on
+        # that exact org, so honouring it here cannot be used to write into an
+        # org the caller cannot edit. Without it, fall back to the primary org.
+        serializer.validated_data.pop('organization_id', None)
+        prop = serializer.save(organization=target_organization(self.request))
         prefix = generate_unit_prefix(prop.name)
         existing_count = Unit.objects.filter(property=prop).count()
         units = []
@@ -278,6 +289,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
 
 class UnitViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['property_id']
     search_fields = ['unit_number', 'status']
@@ -322,6 +334,7 @@ class UnitViewSet(viewsets.ModelViewSet):
 
 
 class TenantViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'phone', 'email']
     ordering_fields = ['name', 'annual_rent', 'lease_expiry_date', 'created_at', 'tenancy_status']
@@ -557,6 +570,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['tenant']
     search_fields = ['reference', 'payment_method', 'notes', 'status']
@@ -677,6 +691,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
 
 class AgreementTemplateViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     serializer_class = TenancyAgreementTemplateSerializer
 
     def get_queryset(self):
@@ -707,6 +722,7 @@ class AgreementTemplateViewSet(viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsWorkspaceMember]
     pagination_class = None
     lookup_value_regex = '[0-9]+'
 
@@ -737,6 +753,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description', 'status', 'priority', 'reported_by']
     ordering_fields = ['priority', 'status', 'created_at', 'updated_at']
@@ -1421,6 +1438,7 @@ def tenant_payments(request):
 # ── Visit Booking ──────────────────────────────────────────────────────────
 
 class PropertyAvailabilityViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     serializer_class = PropertyAvailabilitySerializer
 
     def get_queryset(self):
@@ -1442,6 +1460,7 @@ class PropertyAvailabilityViewSet(viewsets.ModelViewSet):
 
 
 class VisitBookingViewSet(viewsets.ModelViewSet):
+    permission_classes = [CanWriteWorkspace]
     serializer_class = VisitBookingSerializer
 
     def get_queryset(self):

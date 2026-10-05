@@ -24,7 +24,6 @@ AGENT_PLANS = {
         'label': 'Free',
         'monthly_cents': 0,
         'annual_price_cents': 0,
-        'annual_monthly_equivalent': 0,
         'limits': {
             PROPERTIES: 1,
             TEAM_MEMBERS: 1,
@@ -44,7 +43,6 @@ AGENT_PLANS = {
         'label': 'Starter',
         'monthly_cents': 1200,
         'annual_price_cents': 12000,
-        'annual_monthly_equivalent': 1000,
         'limits': {
             PROPERTIES: 5,
             TEAM_MEMBERS: 3,
@@ -64,7 +62,6 @@ AGENT_PLANS = {
         'label': 'Pro',
         'monthly_cents': 2900,
         'annual_price_cents': 29000,
-        'annual_monthly_equivalent': 2417,
         'limits': {
             PROPERTIES: 20,
             TEAM_MEMBERS: 10,
@@ -84,7 +81,6 @@ AGENT_PLANS = {
         'label': 'Agency',
         'monthly_cents': 7900,
         'annual_price_cents': 79000,
-        'annual_monthly_equivalent': 6583,
         'limits': {
             PROPERTIES: UNLIMITED,
             TEAM_MEMBERS: UNLIMITED,
@@ -107,7 +103,6 @@ OWNER_PLANS = {
         'label': 'Free',
         'monthly_cents': 0,
         'annual_price_cents': 0,
-        'annual_monthly_equivalent': 0,
         'limits': {
             PROPERTIES: 1,
             UNITS: 5,
@@ -125,7 +120,6 @@ OWNER_PLANS = {
         'label': 'Starter',
         'monthly_cents': 2400,
         'annual_price_cents': 24000,
-        'annual_monthly_equivalent': 2000,
         'limits': {
             PROPERTIES: 5,
             UNITS: 30,
@@ -143,7 +137,6 @@ OWNER_PLANS = {
         'label': 'Pro',
         'monthly_cents': 5900,
         'annual_price_cents': 59000,
-        'annual_monthly_equivalent': 4917,
         'limits': {
             PROPERTIES: 25,
             UNITS: UNLIMITED,
@@ -161,7 +154,6 @@ OWNER_PLANS = {
         'label': 'Enterprise',
         'monthly_cents': 14900,
         'annual_price_cents': 149000,
-        'annual_monthly_equivalent': 12417,
         'limits': {
             PROPERTIES: UNLIMITED,
             UNITS: UNLIMITED,
@@ -178,6 +170,23 @@ OWNER_PLANS = {
 }
 
 PLANS = {**AGENT_PLANS, **OWNER_PLANS}
+
+
+def _derive_annual_equivalents(plans):
+    """Advertised per-month price on the annual cycle = annual total / 12.
+
+    Derived rather than hand-written. The old hand-maintained field had
+    agent_starter at 1000 ($10/mo) against a $12/mo monthly price, which
+    quietly invented a two-months-free discount nobody approved. The annual
+    total stays the source of truth; this is presentation only.
+    """
+    for plan in plans.values():
+        plan['annual_monthly_equivalent'] = round(
+            plan['annual_price_cents'] / 12
+        )
+
+
+_derive_annual_equivalents(PLANS)
 
 TRACK_PLAN_ORDER = {
     'agent': ['agent_free', 'agent_starter', 'agent_pro', 'agent_agency'],
@@ -215,5 +224,17 @@ def has_feature(plan_key, feature):
 
 
 def price_cents(plan_key, interval='month'):
+    """Total charged for one billing cycle."""
     plan = get_plan(plan_key)
     return plan['annual_price_cents'] if interval == 'year' else plan['monthly_cents']
+
+
+def display_price_cents(plan_key, interval='month'):
+    """Price to show on the pricing card.
+
+    Always the monthly price, on both cycles: the annual card reads
+    "$12/month, billed annually" and states the $120 total separately. The
+    cheaper annual_monthly_equivalent stays an internal figure so nobody
+    implies a discount that was never priced.
+    """
+    return get_plan(plan_key)['monthly_cents']

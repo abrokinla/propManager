@@ -5,6 +5,10 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from workspaces.views import (
+    AgentKYCView, AgentLeadsView, AgentProfileView, AgentPublicProfileView,
+    AgentPropertyListView, AgentStatsView,
+)
 from properties.views import (
     PropertyViewSet, UnitViewSet, TenantViewSet,
     PaymentViewSet, MaintenanceRequestViewSet,
@@ -63,6 +67,12 @@ urlpatterns = [
     path('api/public/properties/slug/<slug:slug>/book/', public_book_visit, name='public-book-visit'),
     path('api/public/properties/slug/<slug:slug>/express-interest/', public_express_interest, name='public-express-interest'),
     path('api/public/properties/slug/<slug:slug>/view/', track_property_view, name='track-property-view'),
+    path('api/agent/profile/', AgentProfileView.as_view(), name='agent-profile'),
+    path('api/agent/kyc/submit/', AgentKYCView.as_view(), name='agent-kyc-submit'),
+    path('api/agent/leads/', AgentLeadsView.as_view(), name='agent-leads'),
+    path('api/agent/stats/', AgentStatsView.as_view(), name='agent-stats'),
+    path('api/public/agents/<slug:slug>/', AgentPublicProfileView.as_view(), name='public-agent-profile'),
+    path('api/public/agents/<slug:slug>/properties/', AgentPropertyListView.as_view(), name='public-agent-property-list'),
     path('api/analytics/summary/', property_analytics_summary, name='analytics-summary'),
     path('api/analytics/property/<int:pk>/', property_analytics_detail, name='analytics-detail'),
     path('api/ai/generate-description/', ai_generate_description, name='ai-generate-description'),

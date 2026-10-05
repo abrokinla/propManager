@@ -49,6 +49,24 @@ class PlanDefinitionTests(TestCase):
         for key in ('agent_starter', 'agent_pro', 'agent_agency', 'owner_pro'):
             self.assertLess(PLANS[key]['annual_monthly_equivalent'], PLANS[key]['monthly_cents'])
 
+    def test_annual_equivalent_is_derived_from_annual_total(self):
+        from workspaces.plans import PLANS
+
+        for key, plan in PLANS.items():
+            self.assertEqual(
+                plan['annual_monthly_equivalent'],
+                round(plan['annual_price_cents'] / 12),
+                msg=f'{key} annual equivalent drifted from its annual price',
+            )
+
+    def test_display_price_is_monthly_on_both_cycles(self):
+        from workspaces.plans import display_price_cents
+
+        # The card says "$12/month, billed annually"; it must never show the
+        # cheaper derived annual figure as the headline.
+        self.assertEqual(display_price_cents('agent_starter', 'month'), 1200)
+        self.assertEqual(display_price_cents('agent_starter', 'year'), 1200)
+
     def test_free_tier_is_one_property_both_tracks(self):
         self.assertEqual(get_limit('agent_free', 'properties'), 1)
         self.assertEqual(get_limit('owner_free', 'properties'), 1)

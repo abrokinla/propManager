@@ -53,13 +53,18 @@ class RegisterSerializer(serializers.ModelSerializer):
 class PropertySerializer(serializers.ModelSerializer):
     owner = UserSerializer(read_only=True)
     owner_id = serializers.IntegerField(write_only=True, required=False)
+    # Accepted on create to file the property under a specific workspace. The
+    # view resolves and permission-checks the org, then pops this so it never
+    # reaches Model.objects.create() alongside organization=.
+    organization_id = serializers.IntegerField(write_only=True, required=False)
     units_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Property
         fields = ['id', 'name', 'address', 'property_type', 'description', 'total_units',
                   'image_url', 'is_published', 'amenities', 'nearby_places',
-                  'public_slug', 'owner', 'owner_id', 'units_count', 'created_at', 'updated_at']
+                  'public_slug', 'owner', 'owner_id', 'organization_id', 'units_count',
+                  'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
     def get_units_count(self, obj):

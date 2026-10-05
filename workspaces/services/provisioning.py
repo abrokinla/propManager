@@ -90,8 +90,30 @@ def get_subscription(user):
     return _ensure_subscription(org)
 
 
+def sync_property_owners(org):
+    """Re-mirror the organization owner onto Property.owner.
+
+    Property.save() only fills owner_id when it is empty, so a property created
+    under one owner kept that owner after the owner role moved. Called whenever
+    ownership can change.
+
+    Bulk update, not .save() per row: Property.save() would regenerate nothing
+    here but still issue one UPDATE per property, and this runs on every owner
+    role change.
+    """
+    from workspaces.permissions import current_owner_id
+
+    new_owner_id = current_owner_id(org)
+    return org.properties.exclude(owner_id=new_owner_id).update(
+        owner_id=new_owner_id
+    )
+
+
 def add_member(org, user, role='staff', accept=False):
     """Add or update a member's role on an organization."""
+    previous_role = (
+        org.memberships.filter(user=user).values_list('role', flat=True).first()
+    )
     membership, created = OrganizationMembership.objects.get_or_create(
         organization=org, user=user, defaults={'role': role}
     )
@@ -103,11 +125,22 @@ def add_member(org, user, role='staff', accept=False):
     if org.kind == 'personal':
         org.kind = 'team'
         org.save(update_fields=['kind'])
+    if role == 'owner' and previous_role != 'owner':
+        sync_property_owners(org)
     return membership
 
 
 def remove_member(org, user):
-    return OrganizationMembership.objects.filter(organization=org, user=user).delete()
+    was_owner = org.memberships.filter(user=user, role='owner').exists()
+    deleted, _ = OrganizationMembership.objects.filter(
+        organization=org, user=user
+    ).delete()
+    if was_owner:
+        # Losing the owner role must not leave properties pointing at someone
+        # who is no longer the owner; clear the mirror if nobody took over.
+        if not org.memberships.filter(role='owner').exists():
+            org.properties.update(owner=None)
+    return deleted
 
 
 def promote_to_team(org):

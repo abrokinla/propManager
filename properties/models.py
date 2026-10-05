@@ -111,14 +111,36 @@ class Property(models.Model):
         if not self.public_slug:
             self.public_slug = uuid.uuid4().hex[:12]
         if self.organization_id and not self.owner_id:
-            owner_membership = (
+            owner_id = (
                 self.organization.memberships.filter(role='owner')
-                .select_related('user')
+                .order_by('-id')
+                .values_list('user_id', flat=True)
                 .first()
             )
-            if owner_membership:
-                self.owner_id = owner_membership.user_id
+            if owner_id:
+                self.owner_id = owner_id
         super().save(*args, **kwargs)
+
+    def refresh_owner_from_org(self):
+        """Re-sync owner_id from the organization, saving only if it changed.
+
+        For callers that need the mirror current after a role change. Does not go
+        through the empty-owner_id guard in save(), which is a create-time
+        convenience and would silently skip an existing property.
+        """
+        if not self.organization_id:
+            return False
+        new_owner_id = (
+            self.organization.memberships.filter(role='owner')
+            .order_by('-id')
+            .values_list('user_id', flat=True)
+            .first()
+        )
+        if new_owner_id == self.owner_id:
+            return False
+        self.owner_id = new_owner_id
+        Property.objects.filter(pk=self.pk).update(owner_id=new_owner_id)
+        return True
 
     def __str__(self):
         return self.name

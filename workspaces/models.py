@@ -25,6 +25,7 @@ class Organization(models.Model):
     billing_country = models.CharField(max_length=2, null=True, blank=True)
     billing_entity = models.CharField(max_length=120, null=True, blank=True)
     whatsapp = models.CharField(max_length=20, blank=True)
+    bio = models.TextField(blank=True, default='')
     timezone = models.CharField(max_length=64, default='UTC')
     logo_url = models.URLField(max_length=500, blank=True, default='')
     brand_color = models.CharField(max_length=7, default='#10b981')
@@ -107,12 +108,19 @@ class PropertyMembership(models.Model):
 
 
 def _plan_choices():
-    tracks = [('agent', 'Agent'), ('owner', 'Owner')]
-    tiers = ['free', 'starter', 'pro', 'agency', 'enterprise']
+    """Build field choices from the real plan definitions.
+
+    Generated from a hardcoded track x tier grid this used to also offer
+    'agent_enterprise' and 'owner_agency', which exist in no plan table and
+    silently fell back to owner_free in get_plan().
+    """
+    from workspaces.plans import PLANS
+
     choices = []
-    for track_key, track_label in tracks:
-        for tier in tiers:
-            choices.append((f'{track_key}_{tier}', f'{track_label} {tier.title()}'))
+    for track, track_label in (('agent', 'Agent'), ('owner', 'Owner')):
+        for key, plan in PLANS.items():
+            if key.startswith(f'{track}_'):
+                choices.append((key, f"{track_label} {plan['label']}"))
     return choices
 
 
@@ -138,6 +146,7 @@ class Subscription(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     limit_overrides = models.JSONField(default=dict, blank=True)
     billing_country = models.CharField(max_length=2, null=True, blank=True)
+    billing_entity = models.CharField(max_length=120, null=True, blank=True)
     paddle_customer_id = models.CharField(max_length=255, blank=True)
     paddle_subscription_id = models.CharField(max_length=255, blank=True)
     paddle_price_id = models.CharField(max_length=255, blank=True)
