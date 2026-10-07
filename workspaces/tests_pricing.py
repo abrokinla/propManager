@@ -126,9 +126,15 @@ class PricingCatalogTests(TestCase):
     def test_checkout_flagged_unavailable(self):
         self.assertFalse(self.data['checkout_available'])
 
-    def test_paddle_ids_not_leaked(self):
-        raw = self.client.get('/api/pricing/').content.decode()
-        self.assertNotIn('paddle', raw.lower())
+    def test_paddle_price_fields_present(self):
+        data = self.client.get('/api/pricing/').json()
+        for track in ('agent', 'owner'):
+            for plan in data['tracks'][track]['plans']:
+                self.assertIn('paddle_price_id_monthly', plan)
+                self.assertIn('paddle_price_id_annual', plan)
+                # When not configured, they should be empty strings
+                self.assertEqual(plan['paddle_price_id_monthly'], '')
+                self.assertEqual(plan['paddle_price_id_annual'], '')
 
     def test_currency_is_usd(self):
         self.assertEqual(self.data['currency'], 'USD')

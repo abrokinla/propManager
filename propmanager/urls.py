@@ -30,6 +30,8 @@ from properties.views import (
     tenant_agreement, tenant_payments, tenant_login,
     tenant_express_interest, tenant_change_password, tenant_maintenance,
     pending_verifications,
+    paddle_webhook,
+    paddle_checkout_success,
 )
 
 router = DefaultRouter()
@@ -97,4 +99,6 @@ urlpatterns = [
     path('api/tenant/me/change-password/', tenant_change_password, name='tenant-change-password'),
     path('api/tenant/me/maintenance/', tenant_maintenance, name='tenant-maintenance'),
     path('api/pending-verifications/', pending_verifications, name='pending-verifications'),
+    path('api/paddle/webhook/', paddle_webhook, name='paddle-webhook'),
+    path('api/paddle/success/', paddle_checkout_success, name='paddle-checkout-success'),
 ]

@@ -1868,3 +1868,148 @@ def ai_generate_social_posts(request):
         return Response({'error': 'AI generation failed. Please try again.'}, status=502)
 
     return Response({'posts': posts})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def paddle_webhook(request):
+    """
+    Paddle webhook endpoint for subscription events.
+
+    Verifies the Paddle signature and handles:
+    - subscription.created
+    - subscription.updated
+    - subscription.cancelled
+    - transaction.completed
+    - transaction.refunded
+    """
+    import hmac
+    import hashlib
+    import json
+    from django.conf import settings
+    from workspaces.models import Organization, Subscription
+
+    webhook_secret = getattr(settings, 'PADDLE_WEBHOOK_SECRET', '')
+    if not webhook_secret:
+        return Response({'error': 'Webhook not configured'}, status=500)
+
+    # Verify signature
+    signature = request.headers.get('Paddle-Signature', '')
+    if not signature:
+        return Response({'error': 'Missing signature'}, status=400)
+
+    # Paddle signs the raw request body
+    expected = hmac.new(
+        webhook_secret.encode(),
+        request.body,
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        return Response({'error': 'Invalid signature'}, status=400)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return Response({'error': 'Invalid JSON'}, status=400)
+
+    event_type = payload.get('event_type')
+    data = payload.get('data', {})
+
+    # Map Paddle price ID to our plan key
+    price_id = data.get('price_id') or data.get('items', [{}])[0].get('price_id')
+    if not price_id:
+        return Response({'status': 'ignored - no price_id'}, status=200)
+
+    plan_key = _paddle_price_to_plan_key(price_id)
+    if not plan_key:
+        return Response({'status': 'ignored - unknown price'}, status=200)
+
+    # Find organization by paddle_customer_id or paddle_subscription_id
+    customer_id = data.get('customer_id')
+    subscription_id = data.get('subscription_id')
+
+    org = None
+    if subscription_id:
+        org = Organization.objects.filter(subscription__paddle_subscription_id=subscription_id).first()
+    if not org and customer_id:
+        org = Organization.objects.filter(subscription__paddle_customer_id=customer_id).first()
+
+    if not org:
+        return Response({'status': 'ignored - org not found'}, status=200)
+
+    sub, _ = Subscription.objects.get_or_create(organization=org)
+
+    if event_type in ('subscription.created', 'subscription.updated'):
+        sub.plan = plan_key
+        sub.interval = 'year' if 'year' in (data.get('billing_cycle', {}).get('interval', '') or '') else 'month'
+        sub.status = data.get('status', 'active')
+        sub.paddle_customer_id = customer_id or ''
+        sub.paddle_subscription_id = subscription_id or ''
+        sub.paddle_price_id = price_id
+        sub.current_period_end = _parse_paddle_date(data.get('next_billed_at') or data.get('current_billing_period', {}).get('ends_at'))
+        sub.save()
+
+    elif event_type == 'subscription.cancelled':
+        sub.status = 'cancelled'
+        sub.save()
+
+    elif event_type == 'transaction.completed':
+        # Ensure subscription is active after successful payment
+        if sub.status != 'active':
+            sub.status = 'active'
+            sub.save()
+
+    elif event_type == 'transaction.refunded':
+        sub.status = 'past_due'
+        sub.save()
+
+    return Response({'status': 'ok'})
+
+
+def _paddle_price_to_plan_key(price_id: str) -> str | None:
+    """Map Paddle Price ID to internal plan key."""
+    from django.conf import settings
+    mapping = {
+        getattr(settings, 'PADDLE_PRICE_AGENT_STARTER_MONTHLY', ''): 'agent_starter',
+        getattr(settings, 'PADDLE_PRICE_AGENT_STARTER_ANNUAL', ''): 'agent_starter',
+        getattr(settings, 'PADDLE_PRICE_AGENT_PRO_MONTHLY', ''): 'agent_pro',
+        getattr(settings, 'PADDLE_PRICE_AGENT_PRO_ANNUAL', ''): 'agent_pro',
+        getattr(settings, 'PADDLE_PRICE_AGENT_AGENCY_MONTHLY', ''): 'agent_agency',
+        getattr(settings, 'PADDLE_PRICE_AGENT_AGENCY_ANNUAL', ''): 'agent_agency',
+        getattr(settings, 'PADDLE_PRICE_OWNER_STARTER_MONTHLY', ''): 'owner_starter',
+        getattr(settings, 'PADDLE_PRICE_OWNER_STARTER_ANNUAL', ''): 'owner_starter',
+        getattr(settings, 'PADDLE_PRICE_OWNER_PRO_MONTHLY', ''): 'owner_pro',
+        getattr(settings, 'PADDLE_PRICE_OWNER_PRO_ANNUAL', ''): 'owner_pro',
+        getattr(settings, 'PADDLE_PRICE_OWNER_ENTERPRISE_MONTHLY', ''): 'owner_enterprise',
+        getattr(settings, 'PADDLE_PRICE_OWNER_ENTERPRISE_ANNUAL', ''): 'owner_enterprise',
+    }
+    return mapping.get(price_id)
+
+
+def _parse_paddle_date(date_str: str | None):
+    """Parse Paddle RFC3339 datetime string to timezone-aware datetime."""
+    if not date_str:
+        return None
+    from datetime import datetime
+    from django.utils import timezone
+    try:
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        return dt if dt.tzinfo else timezone.make_aware(dt)
+    except Exception:
+        return None
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def paddle_checkout_success(request):
+    """
+    Paddle redirects here after successful checkout.
+    Query params: track, plan, paddle_checkout=completed
+    We redirect to register page with those params so the user can complete signup.
+    The webhook will have already created the subscription.
+    """
+    track = request.GET.get('track', 'owner')
+    plan = request.GET.get('plan', 'owner_starter')
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'https://propmanager.abrokinla.workers.dev')
+    return HttpResponseRedirect(f'{frontend_url}/{track}/register?track={track}&plan={plan}&paddle_checkout=completed')

@@ -9,9 +9,8 @@ Two deliberate omissions:
   (and cheaper) per-month figure; the card shows the monthly price and states
   the annual total separately, so shipping it would invite the frontend to
   advertise a discount nobody priced.
-- ``paddle_*_price_id`` is never returned. Until Paddle is live those are empty
-  strings, and exposing them would suggest a checkout path that does not exist.
 """
+from django.conf import settings
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,7 +25,44 @@ PENDING_FEATURES = {'whatsapp_api'}
 #: old hardcoded pricing section used.
 POPULAR_PLAN = {'agent': 'agent_pro', 'owner': 'owner_pro'}
 
+#: Map internal plan key -> Paddle price IDs (from env). Populated when
+#: Paddle env vars are set. Only paid plans have IDs.
+PADDLE_PRICE_MAP = {
+    'agent_starter': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_AGENT_STARTER_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_AGENT_STARTER_ANNUAL', ''),
+    },
+    'agent_pro': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_AGENT_PRO_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_AGENT_PRO_ANNUAL', ''),
+    },
+    'agent_agency': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_AGENT_AGENCY_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_AGENT_AGENCY_ANNUAL', ''),
+    },
+    'owner_starter': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_OWNER_STARTER_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_OWNER_STARTER_ANNUAL', ''),
+    },
+    'owner_pro': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_OWNER_PRO_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_OWNER_PRO_ANNUAL', ''),
+    },
+    'owner_enterprise': {
+        'monthly': getattr(settings, 'PADDLE_PRICE_OWNER_ENTERPRISE_MONTHLY', ''),
+        'annual': getattr(settings, 'PADDLE_PRICE_OWNER_ENTERPRISE_ANNUAL', ''),
+    },
+}
+
 UNLIMITED = -1
+
+
+def _has_paddle_prices() -> bool:
+    """Return True if at least one paid plan has both monthly and annual Paddle IDs."""
+    for plan_key, ids in PADDLE_PRICE_MAP.items():
+        if ids['monthly'] and ids['annual']:
+            return True
+    return False
 
 
 def _limit_for_display(value):
@@ -36,14 +72,13 @@ def _limit_for_display(value):
 
 def serialize_plan(plan_key):
     plan = PLANS[plan_key]
+    paddle_ids = PADDLE_PRICE_MAP.get(plan_key, {'monthly': '', 'annual': ''})
     return {
         'key': plan_key,
         'label': plan['label'],
         'track': plan_key.split('_', 1)[0],
         'monthly_cents': plan['monthly_cents'],
         'annual_cents': plan['annual_price_cents'],
-        # Always the monthly figure, on both cycles. The card reads
-        # "$12/month, billed annually" and shows annual_cents as the total.
         'display_monthly_cents': plan['monthly_cents'],
         'is_free': plan['monthly_cents'] == 0,
         'limits': {
@@ -61,6 +96,8 @@ def serialize_plan(plan_key):
             plan['features'][name] and name in PENDING_FEATURES
             for name in plan['features']
         ),
+        'paddle_price_id_monthly': paddle_ids['monthly'],
+        'paddle_price_id_annual': paddle_ids['annual'],
     }
 
 
@@ -81,6 +118,6 @@ class PricingView(APIView):
         return Response({
             'currency': 'USD',
             'whatsapp_api_available': False,
-            'checkout_available': False,
+            'checkout_available': _has_paddle_prices(),
             'tracks': tracks,
         })
