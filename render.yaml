@@ -6,7 +6,7 @@ services:
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
       python manage.py migrate
-    startCommand: gunicorn propmanager.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    startCommand: gunicorn propmanager.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --preload=false
     healthCheckPath: /api/health/
     envVars:
       - key: DJANGO_SETTINGS_MODULE
