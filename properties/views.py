@@ -1876,16 +1876,19 @@ def paddle_webhook(request):
     """
     Paddle webhook endpoint for subscription events.
 
-    Verifies the Paddle signature and handles:
+    Verifies the Paddle signature (Paddle-Signature: ts=...;h1=...) and handles:
     - subscription.created
     - subscription.updated
     - subscription.cancelled
     - transaction.completed
     - transaction.refunded
+    - transaction.paid
+    - customer.created
     """
     import hmac
     import hashlib
     import json
+    import time
     from django.conf import settings
     from workspaces.models import Organization, Subscription
 
@@ -1893,21 +1896,54 @@ def paddle_webhook(request):
     if not webhook_secret:
         return Response({'error': 'Webhook not configured'}, status=500)
 
-    # Verify signature
-    signature = request.headers.get('Paddle-Signature', '')
-    if not signature:
-        return Response({'error': 'Missing signature'}, status=400)
+    # Verify Paddle signature
+    signature_header = request.headers.get('Paddle-Signature', '')
+    if not signature_header:
+        return Response({'error': 'Missing Paddle-Signature header'}, status=400)
 
-    # Paddle signs the raw request body
-    expected = hmac.new(
-        webhook_secret.encode(),
-        request.body,
+    # Parse signature header: ts=...;h1=...;h1=...
+    try:
+        timestamp = None
+        signatures = []
+        for part in signature_header.split(';'):
+            if part.startswith('ts='):
+                timestamp = part[3:]
+            elif part.startswith('h1='):
+                signatures.append(part[3:])
+        if not timestamp or not signatures:
+            raise ValueError
+        timestamp_int = int(timestamp)
+    except (ValueError, IndexError):
+        return Response({'error': 'Invalid Paddle-Signature format'}, status=400)
+
+    # Replay attack protection: reject if timestamp > 5 minutes old
+    now = int(time.time())
+    if abs(now - timestamp_int) > 300:
+        return Response({'error': 'Webhook timestamp expired'}, status=408)
+
+    # Build signed payload: timestamp:raw_body
+    signed_payload = f"{timestamp}:{request.body.decode('utf-8')}"
+
+    # Compute expected signature using HMAC-SHA256
+    expected_signature = hmac.new(
+        webhook_secret.encode('utf-8'),
+        signed_payload.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
 
-    if not hmac.compare_digest(signature, expected):
-        return Response({'error': 'Invalid signature'}, status=400)
+    # Timing-safe comparison against all provided signatures (handles secret rotation)
+    expected_bytes = expected_signature.encode('utf-8')
+    valid = False
+    for sig in signatures:
+        sig_bytes = sig.encode('utf-8')
+        if len(sig_bytes) == len(expected_bytes) and hmac.compare_digest(sig_bytes, expected_bytes):
+            valid = True
+            break
 
+    if not valid:
+        return Response({'error': 'Invalid signature'}, status=401)
+
+    # Parse payload
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
@@ -1915,6 +1951,14 @@ def paddle_webhook(request):
 
     event_type = payload.get('event_type')
     data = payload.get('data', {})
+
+    # Idempotency: track processed event_ids (in-memory set, resets on deploy)
+    # For production, use Redis or DB. This prevents duplicate processing on retries.
+    event_id = payload.get('event_id')
+    if not hasattr(paddle_webhook, '_processed_events'):
+        paddle_webhook._processed_events = set()
+    if event_id and event_id in paddle_webhook._processed_events:
+        return Response({'status': 'duplicate - already processed'}, status=200)
 
     # Map Paddle price ID to our plan key
     price_id = data.get('price_id') or data.get('items', [{}])[0].get('price_id')
@@ -1940,19 +1984,41 @@ def paddle_webhook(request):
 
     sub, _ = Subscription.objects.get_or_create(organization=org)
 
+    # Update customer_id on subscription if we have it
+    if customer_id:
+        sub.paddle_customer_id = customer_id
+
     if event_type in ('subscription.created', 'subscription.updated'):
         sub.plan = plan_key
-        sub.interval = 'year' if 'year' in (data.get('billing_cycle', {}).get('interval', '') or '') else 'month'
-        sub.status = data.get('status', 'active')
-        sub.paddle_customer_id = customer_id or ''
+        billing_cycle = data.get('billing_cycle', {})
+        interval = billing_cycle.get('interval', '')
+        sub.interval = 'year' if 'year' in interval else 'month'
+        # Map Paddle statuses to our statuses
+        paddle_status = data.get('status', 'active')
+        status_map = {
+            'active': 'active',
+            'trialing': 'trialing',
+            'past_due': 'past_due',
+            'cancelled': 'cancelled',
+            'paused': 'paused',
+        }
+        sub.status = status_map.get(paddle_status, 'active')
         sub.paddle_subscription_id = subscription_id or ''
         sub.paddle_price_id = price_id
-        sub.current_period_end = _parse_paddle_date(data.get('next_billed_at') or data.get('current_billing_period', {}).get('ends_at'))
+        sub.current_period_end = _parse_paddle_date(
+            data.get('next_billed_at') or data.get('current_billing_period', {}).get('ends_at')
+        )
         sub.save()
 
     elif event_type == 'subscription.cancelled':
         sub.status = 'cancelled'
         sub.save()
+
+    elif event_type == 'transaction.paid':
+        # Immediate provisioning on successful payment
+        if sub.status != 'active':
+            sub.status = 'active'
+            sub.save()
 
     elif event_type == 'transaction.completed':
         # Ensure subscription is active after successful payment
@@ -1963,6 +2029,16 @@ def paddle_webhook(request):
     elif event_type == 'transaction.refunded':
         sub.status = 'past_due'
         sub.save()
+
+    elif event_type == 'customer.created':
+        # Store Paddle customer ID on organization
+        if customer_id:
+            org.paddle_customer_id = customer_id
+            org.save()
+
+    # Mark event as processed
+    if event_id:
+        paddle_webhook._processed_events.add(event_id)
 
     return Response({'status': 'ok'})
 
